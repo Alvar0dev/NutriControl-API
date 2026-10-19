@@ -1,6 +1,7 @@
 package models
 
 type Paciente struct {
+	ID              string  `json:"id,omitempty"`
 	Nombre          string  `json:"nombre"`
 	Edad            int     `json:"edad"`
 	Peso            float64 `json:"peso"`
