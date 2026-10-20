@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/labstack/echo/v4"
+
 	"nutricontrol/models"
 	"nutricontrol/pkg/firestore"
 )
@@ -23,7 +25,7 @@ func CreatePaciente(c echo.Context, repo *firestore.PacienteRepository) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 	// Validación mínima: nombre requerido
-	if paciente.Nombre == "" {
+	if paciente Nombre == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'nombre' es requerido"})
 	}
 	pacienteCreado, err := repo.Create(c.Request().Context(), *paciente)
@@ -33,6 +35,27 @@ func CreatePaciente(c echo.Context, repo *firestore.PacienteRepository) error {
 	return c.JSON(http.StatusCreated, pacienteCreado)
 }
 
+// UpdatePaciente actualiza un paciente existente por ID.
+func UpdatePaciente(c echo.Context, repo *firestore.PacienteRepository) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+	}
+	p := new(models.Paciente)
+	if err := c.Bind(p); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+	if p Nombre == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'nombre' es requerido"})
+	}
+	p.ID = id
+	pacienteActualizado, err := repo.Update(c.Request().Context(), id, *p)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+	return c.JSON(http.StatusOK, pacienteActualizado)
+}
+
 // SetupRoutes configura las rutas de pacientes con inyección de dependencia.
 func SetupRoutes(e *echo.Echo, repo *firestore.PacienteRepository) {
 	e.GET("/pacientes", func(c echo.Context) error {
@@ -40,5 +63,8 @@ func SetupRoutes(e *echo.Echo, repo *firestore.PacienteRepository) {
 	})
 	e.POST("/pacientes", func(c echo.Context) error {
 		return CreatePaciente(c, repo)
+	})
+	e.PUT("/pacientes/{id}", func(c echo.Context) error {
+		return UpdatePaciente(c, repo)
 	})
 }

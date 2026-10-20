@@ -29,3 +29,18 @@ func (m *MockPacienteRepository) Create(ctx context.Context, p models.Paciente) 
 func (m *MockPacienteRepository) GetAll(ctx context.Context) ([]models.Paciente, error) {
 	return m.store, nil
 }
+
+// Update modifica un paciente existente por ID.
+func (m *MockPacienteRepository) Update(ctx context.Context, id string, p models.Paciente) (*models.Paciente, error) {
+	for _, existing := range m.store {
+		if existing.ID == id {
+			existing.Nombre = p.Nombre
+			existing.Edad = p.Edad
+			existing.Peso = p.Peso
+			existing.PorcentajeGrasa = p.PorcentajeGrasa
+			existing.Notas = p.Notas
+			return &existing, nil
+		}
+	}
+	return nil, fmt.Errorf("no se encontró paciente con ID %s", id)
+}
