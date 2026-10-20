@@ -10,7 +10,7 @@ import (
 )
 
 // GetPacientes obtiene todos los pacientes mediante el repositorio.
-func GetPacientes(c echo.Context, repo *firestore.PacienteRepository) error {
+func GetPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 	pacientes, err := repo.GetAll(c.Request().Context())
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
@@ -19,13 +19,13 @@ func GetPacientes(c echo.Context, repo *firestore.PacienteRepository) error {
 }
 
 // CreatePaciente crea un nuevo paciente mediante el repositorio.
-func CreatePaciente(c echo.Context, repo *firestore.PacienteRepository) error {
+func CreatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	paciente := new(models.Paciente)
 	if err := c.Bind(paciente); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 	// Validación mínima: nombre requerido
-	if paciente Nombre == "" {
+	if paciente.Nombre == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'nombre' es requerido"})
 	}
 	pacienteCreado, err := repo.Create(c.Request().Context(), *paciente)
@@ -36,7 +36,7 @@ func CreatePaciente(c echo.Context, repo *firestore.PacienteRepository) error {
 }
 
 // UpdatePaciente actualiza un paciente existente por ID.
-func UpdatePaciente(c echo.Context, repo *firestore.PacienteRepository) error {
+func UpdatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	id := c.Param("id")
 	if id == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
@@ -45,7 +45,7 @@ func UpdatePaciente(c echo.Context, repo *firestore.PacienteRepository) error {
 	if err := c.Bind(p); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
-	if p Nombre == "" {
+	if p.Nombre == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'nombre' es requerido"})
 	}
 	p.ID = id
@@ -57,7 +57,7 @@ func UpdatePaciente(c echo.Context, repo *firestore.PacienteRepository) error {
 }
 
 // SetupRoutes configura las rutas de pacientes con inyección de dependencia.
-func SetupRoutes(e *echo.Echo, repo *firestore.PacienteRepository) {
+func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	e.GET("/pacientes", func(c echo.Context) error {
 		return GetPacientes(c, repo)
 	})

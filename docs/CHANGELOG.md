@@ -11,8 +11,13 @@
 ### [B] Mejoras en el modelo `Paciente`
 - Se agregó el campo `ID string` con tag JSON `"id,omitempty"` para asegurar que cada paciente tenga un identificador único.
 
+### [C] Corrección de firmas de repositorio en handlers
+- Los handlers y `SetupRoutes` ahora reciben `firestore.PacienteRepository` (interfaz por valor) en lugar de `*firestore.PacienteRepository` (puntero a interfaz).
+- Motivo: un puntero a interfaz no expone los métodos de la interfaz, lo que rompía la compilación de `handlers` y `main`.
+- `main.go` sigue igual: ya declaraba `var repo firestore.PacienteRepository`.
+
 ## Pendiente
 - Implementar `Update` real en `pkg/firestore/repo.go` (integración con Firestore).
-- Implementar `Update` en `pkg/firestore/mock.go` (ya hecho).
-- Agregar pruebas unitarias para el endpoint `PUT /pacientes/{id}`.
+- Resolver dependencias faltantes (`cloud.google.com/go/firestore`) en `go.mod` (preexistente, no relacionado con Update).
+- Agregar pruebas unitarias para `PUT /pacientes/{id}` y verificar con `curl` (servidor requiere módulo Firestore resuelto para arrancar).
 - Verificar persistencia tras reinicio del servidor.
