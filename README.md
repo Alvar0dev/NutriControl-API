@@ -29,9 +29,9 @@
 - **Acciones Realizadas**:
   - Creación de `AGENTS.md` con contexto operativo principal, comandos y convenciones.
   - Creación de `docs/constitution.md` con 8 principios innegociables.
-  - Creación de `specs/001-persistence-layer/spec.md` con requisitos funcionales y criterios de aceptación.
-  - Creación de `specs/001-persistence-layer/plan.md` con plan técnico detallado.
-  - Creación de `specs/001-persistence-layer/tasks.md` con desglose de tareas pequeñas y dependencias.
+  - Creación de `specs/001-persistence-layer/spec.md` con requisitos funcionales y criterios de aceptación (ARCHIVADO en `specs/archive/`).
+  - Creación de `specs/001-persistence-layer/plan.md` con plan técnico detallado (ARCHIVADO en `specs/archive/`).
+  - Creación de `specs/001-persistence-layer/tasks.md` con desglose de tareas pequeñas y dependencias (ARCHIVADO en `specs/archive/`).
 - **Dificultades Encontradas**:
   - **Especificación confusa de Firestore**: La primera versión del plan (`plan.md`) mezclaba la interfaz de repositorio con la implementación de Firestore, lo que generaba confusión para los tests. Se separaron claramente en `paciente_repo.go` (interfaz) y `repo.go` (implementación real), dejando `mock.go` para testing.
   - **Versión incompatible de `cloud.google.com/go/firestore`**: La primera tentativa de `go get firestore` falló porque la versión `v0.24.0` no existía en el repositorio. Se dejó pendiente la dependencia real y se validó la arquitectura con el mock.
@@ -39,7 +39,7 @@
 - **Estructura de carpetas actual**:
   - `AGENTS.md` - Contexto operativo principal
   - `docs/constitution.md` - Principios innegociables
-  - `specs/001-persistence-layer/` - Especificación, plan y tareas para la capa de persistencia
+  - `specs/archive/001-persistence-layer/` - [ARCHIVADO / ODD] Especificación SDD superada por implementación directa en `pkg/firestore/`. Referenciado por `PROJECT_INDEX.md`.
   - `main.go` - Punto de entrada principal
   - `handlers/paciente.go` - Endpoints HTTP con datos mockeados
   - `models/paciente.go` - Modelo de dominio

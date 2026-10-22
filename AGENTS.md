@@ -1,13 +1,16 @@
-# AGENTS.md - NutriControl API Operational Context
+# AGENTS.md - NutriControl API Operational Context (ODD / Gentle Shell)
+
+> Flujo ODD (Organic Driven Development): cambios emergen del código, no de specs rígidas previas. La especificación SDD antigua (`specs/001-persistence-layer/`) está archivada en `specs/archive/`.
 
 ## Project Summary
-NutriControl API provides patient management endpoints using Go and Echo framework. Currently in early development (Day 2/3) with basic CRUD operations for patient data.
+NutriControl API proporciona endpoints para gestión de pacientes (Go + Echo v4). CRUD completo con persistencia Firestore, repositorio abstracto (`PacienteRepository`) y mock para desarrollo/test.
 
 ## Current Architecture
 - **Language**: Go 1.26.1
-- **Web Framework**: Echo v4.16.0 (minimalist approach)
-- **Structure**: Clean separation between models (domain) and handlers (HTTP layer)
-- **Current State**: Mock data implementation, no persistence layer yet
+- **Web Framework**: Echo v4.16.0
+- **Structure**: Domain (`models/`) / HTTP (`handlers/`) / Adaptador (`pkg/firestore/`).
+- **Persistence**: Firestore (`pkg/firestore/repo.go`, `paciente_repo.go`) con mock (`mock.go`).
+- **State**: Persistencia operativa, CRUD completo (`GET/POST/PUT/DELETE` por ID). Tests presentes (`handlers/`, `models/`).
 
 ## Key Commands
 ```bash
@@ -22,14 +25,16 @@ go run ./...
 ```
 
 ## Established Conventions
-- **Code Structure**: Separate packages for domain vs. presentation layers
-- **JSON Tags**: Struct fields include `json:"field_name"` annotations
-- **Error Handling**: Basic HTTP error responses with JSON bodies
-- **Mocking**: Starting with mocked data before implementing persistence
-- **Commit Style**: Conventional commits with clear, actionable titles
+- **Code Structure**: Domain (`models/`) / Presentation (`handlers/`) / Adapter (`pkg/firestore/`).
+- **JSON Tags**: Struct fields include `json:"field_name"` annotations (`models/paciente.go`).
+- **Error Handling**: Basic HTTP error responses with JSON bodies (`handlers/paciente.go`).
+- **Mocking**: Mock repository (`pkg/firestore/mock.go`) + Firestore real (`pkg/firestore/repo.go`).
+- **Inyección**: Repositorio por argumento a handlers (`SetupRoutes`).
+- **Commit Style**: Conventional commits.
+- **Documentación de arranque**: `PROJECT_INDEX.md`, `DEV_RUNBOOK.md`. Especificación SDD archivada (`specs/archive/001-persistence-layer/`).
 
 ## Boundaries (No-touch zones without explicit permission)
-- **Data Persistence**: No files in `data/`, `db/`, or `storage/` directories (to be decided)
-- **Testing Strategy**: No existing test files - future tests must follow Go testing conventions
-- **API Documentation**: No OpenAPI/Swagger files present (to be added in future)
-- **Configuration**: No `.env`, `config/`, or environment-specific setups currently
+- **Data Persistence**: `pkg/firestore/` es la capa de persistencia activa; no crear `data/`, `db/`, `storage/` sin acuerdo.
+- **Testing Strategy**: Tests existentes (`handlers/paciente_test.go`, `models/paciente_test.go`). Nuevos tests deben seguir Go (`testing` + `testify`).
+- **API Documentation**: No OpenAPI/Swagger aún. Contactos por archivo (`handlers/paciente.go`).
+- **Configuration**: No `.env` estructurado aún (`main.go` lee env vars directa).

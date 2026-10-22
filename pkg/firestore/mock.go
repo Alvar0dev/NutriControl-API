@@ -30,17 +30,38 @@ func (m *MockPacienteRepository) GetAll(ctx context.Context) ([]models.Paciente,
 	return m.store, nil
 }
 
-// Update modifica un paciente existente por ID.
-func (m *MockPacienteRepository) Update(ctx context.Context, id string, p models.Paciente) (*models.Paciente, error) {
-	for _, existing := range m.store {
-		if existing.ID == id {
-			existing.Nombre = p.Nombre
-			existing.Edad = p.Edad
-			existing.Peso = p.Peso
-			existing.PorcentajeGrasa = p.PorcentajeGrasa
-			existing.Notas = p.Notas
-			return &existing, nil
+// GetByID recupera un paciente por ID desde el mock.
+func (m *MockPacienteRepository) GetByID(ctx context.Context, id string) (*models.Paciente, error) {
+	for _, p := range m.store {
+		if p.ID == id {
+			return &p, nil
 		}
 	}
 	return nil, fmt.Errorf("no se encontró paciente con ID %s", id)
+}
+
+// Update modifica un paciente existente por ID.
+func (m *MockPacienteRepository) Update(ctx context.Context, id string, p models.Paciente) (*models.Paciente, error) {
+	for i, existing := range m.store {
+		if existing.ID == id {
+			m.store[i].Nombre = p.Nombre
+			m.store[i].Edad = p.Edad
+			m.store[i].Peso = p.Peso
+			m.store[i].PorcentajeGrasa = p.PorcentajeGrasa
+			m.store[i].Notas = p.Notas
+			return &m.store[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no se encontró paciente con ID %s", id)
+}
+
+// Delete elimina un paciente del mock por ID.
+func (m *MockPacienteRepository) Delete(ctx context.Context, id string) error {
+	for i, p := range m.store {
+		if p.ID == id {
+			m.store = append(m.store[:i], m.store[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("no se encontró paciente con ID %s", id)
 }

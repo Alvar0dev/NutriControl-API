@@ -56,6 +56,31 @@ func UpdatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	return c.JSON(http.StatusOK, pacienteActualizado)
 }
 
+// GetPacienteByID obtiene un paciente por su ID.
+func GetPacienteByID(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+	}
+	paciente, err := repo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+	return c.JSON(http.StatusOK, paciente)
+}
+
+// DeletePaciente elimina un paciente por su ID.
+func DeletePaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+	}
+	if err := repo.Delete(c.Request().Context(), id); err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
 // SetupRoutes configura las rutas de pacientes con inyección de dependencia.
 func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	e.GET("/pacientes", func(c echo.Context) error {
@@ -64,7 +89,13 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	e.POST("/pacientes", func(c echo.Context) error {
 		return CreatePaciente(c, repo)
 	})
+	e.GET("/pacientes/{id}", func(c echo.Context) error {
+		return GetPacienteByID(c, repo)
+	})
 	e.PUT("/pacientes/{id}", func(c echo.Context) error {
 		return UpdatePaciente(c, repo)
+	})
+	e.DELETE("/pacientes/{id}", func(c echo.Context) error {
+		return DeletePaciente(c, repo)
 	})
 }
