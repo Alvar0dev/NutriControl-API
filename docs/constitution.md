@@ -40,4 +40,4 @@
 ### 8. Iteración por Especificaciones
 - Cada cambio de código originado de especificaciones actualizadas
 - Versiónamiento semántico guiado por cambios contractuales
-- Base de especificaciones como verdad única del sistema
+- Base de especificaciones como verdad única del sistemaActualizado ODD: estructura, tracking odd/tasks/, SDD archivado eliminado (specs/archive/). Contratos: Go+Echo, Firestore/mock, manual DI, no tocar persistencia sin acuerdo.

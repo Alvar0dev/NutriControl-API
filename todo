@@ -1,0 +1,6 @@
+- [done] Estructuración ODD documentada: odd/tasks/000-reestructuracion-documental.md
+- [done] SDD archivado eliminado: specs/archive/001-persistence-layer/ (confirmado usuario)
+- [done] docs/constitution.md actualizado con contratos ODD
+- [pending] Corregir handlers/paciente_test.go (Echo v4 Response.Body roto — falló en go test)
+- [pending] Actualizar PROJECT_INDEX.md / DEV_RUNBOOK.md con estructura completa (S1/S2 aún por completar en detalle)
+- [pending] Próxima feature: reparar suite de tests y/o extender repo Firestore/mock
