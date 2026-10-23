@@ -36,7 +36,7 @@ func TestGetPacientesOK(t *testing.T) {
 	assert.Equal(t, http.StatusOK, c.Response().Status)
 
 	var pacientes []models.Paciente
-	err = json.Unmarshal(c.Response().Body.Bytes(), &pacientes)
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
 	require.NoError(t, err)
 	assert.Len(t, pacientes, 2)
 	assert.Equal(t, "Juan Perez", pacientes[0].Nombre)
@@ -60,7 +60,7 @@ func TestCreatePacienteOK(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, c.Response().Status)
 
 	var creado models.Paciente
-	err = json.Unmarshal(c.Response().Body.Bytes(), &creado)
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &creado)
 	require.NoError(t, err)
 	assert.Equal(t, "Ana Lopez", creado.Nombre)
 	assert.Equal(t, 28, creado.Edad)
@@ -86,7 +86,7 @@ func TestCreatePacienteSinNombre(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
 
 	var resp map[string]string
-	err = json.Unmarshal(c.Response().Body.Bytes(), &resp)
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.Contains(t, resp["error"], "nombre")
 }
