@@ -14,11 +14,14 @@ Reestructurar la documentación del proyecto según ODD (Organic Driven Developm
 ## Sesión actual (avance pequeño — ODD)
 - [HECHO] Corregido `handlers/paciente_test.go`: `c.Response().Body.Bytes()` → `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (Echo v4)
 - [HECHO] `go test ./...` pasa: `handlers` y `models` verdes
+- [HECHO] Commit `b3754f1` publicado en `main` (fix: corregir lectura de Response.Body en tests de handlers)
 
-## Pendiente (seleccionar B o C)
+## Pendiente para mañana (seleccionar B o C)
 B) Completar `PROJECT_INDEX.md` y `DEV_RUNBOOK.md` (S1/S2 aún incompletos)
 C) Nueva feature: extender repo Firestore/mock o agregar endpoint
 
 ## Notas
-- Código fuente intacto; solo cambios documentales y de estructura.
-- Archivo `specs/archive/` eliminado con confirmación del usuario.
+- Código fuente intacto; solo cambios de test y documentación de seguimiento.
+- Próxima sesión: elegir B o C y seguir con un paso pequeño verificable.
+
+
