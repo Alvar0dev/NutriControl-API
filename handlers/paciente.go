@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -18,15 +19,28 @@ func GetPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 	return c.JSON(http.StatusOK, pacientes)
 }
 
+// validarPaciente verifica las reglas de negocio mínimas: nombre, edad y peso > 0.
+func validarPaciente(p models.Paciente) error {
+	if p.Nombre == "" {
+		return fmt.Errorf("El campo 'nombre' es requerido")
+	}
+	if p.Edad <= 0 {
+		return fmt.Errorf("El campo 'edad' debe ser mayor que 0")
+	}
+	if p.Peso <= 0 {
+		return fmt.Errorf("El campo 'peso' debe ser mayor que 0")
+	}
+	return nil
+}
+
 // CreatePaciente crea un nuevo paciente mediante el repositorio.
 func CreatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	paciente := new(models.Paciente)
 	if err := c.Bind(paciente); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
-	// Validación mínima: nombre requerido
-	if paciente.Nombre == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'nombre' es requerido"})
+	if err := validarPaciente(*paciente); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 	pacienteCreado, err := repo.Create(c.Request().Context(), *paciente)
 	if err != nil {
@@ -45,8 +59,8 @@ func UpdatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	if err := c.Bind(p); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
-	if p.Nombre == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'nombre' es requerido"})
+	if err := validarPaciente(*p); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 	p.ID = id
 	pacienteActualizado, err := repo.Update(c.Request().Context(), id, *p)

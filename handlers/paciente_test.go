@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/labstack/echo/v4"
 
@@ -14,6 +16,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// setParam establece un parámetro de ruta en el contexto de Echo sin pasar por el router.
+// Útil para probar handlers que usan c.Param directamente (Update, Delete).
+// Echo v4 almacena los parámetros en pnames []string y pvalues []string (campos no exportados).
+func setParam(c echo.Context, key, value string) {
+	v := reflect.ValueOf(c).Elem()
+	pnames := v.FieldByName("pnames")
+	pvalues := v.FieldByName("pvalues")
+	if pnames.IsValid() && pvalues.IsValid() {
+		reflect.NewAt(pnames.Type(), unsafe.Pointer(pnames.UnsafeAddr())).Elem().Set(reflect.ValueOf([]string{key}))
+		reflect.NewAt(pvalues.Type(), unsafe.Pointer(pvalues.UnsafeAddr())).Elem().Set(reflect.ValueOf([]string{value}))
+	}
+}
 
 // newTestEcho crea una instancia de Echo para tests.
 func newTestEcho() *echo.Echo {
@@ -89,6 +104,96 @@ func TestCreatePacienteSinNombre(t *testing.T) {
 	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.Contains(t, resp["error"], "nombre")
+}
+
+func TestCreatePacienteEdadInvalida(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"nombre":"Ana Lopez","edad":0,"peso":68.5,"porcentaje_grasa":24.0,"notas":"Nueva consulta"}`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := CreatePaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "edad")
+}
+
+func TestCreatePacientePesoInvalido(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"nombre":"Ana Lopez","edad":28,"peso":0,"porcentaje_grasa":24.0,"notas":"Nueva consulta"}`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := CreatePaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "peso")
+}
+
+func TestUpdatePacienteEdadInvalida(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"nombre":"Ana Lopez","edad":-5,"peso":68.5,"porcentaje_grasa":24.0,"notas":"Nueva consulta"}`
+	req := httptest.NewRequest(http.MethodPut, "/pacientes/1", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", "1")
+
+	// Act
+	err := UpdatePaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "edad")
+}
+
+func TestUpdatePacientePesoInvalido(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"nombre":"Ana Lopez","edad":28,"peso":-2,"porcentaje_grasa":24.0,"notas":"Nueva consulta"}`
+	req := httptest.NewRequest(http.MethodPut, "/pacientes/1", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", "1")
+
+	// Act
+	err := UpdatePaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "peso")
 }
 
 func TestSetupRoutes(t *testing.T) {
