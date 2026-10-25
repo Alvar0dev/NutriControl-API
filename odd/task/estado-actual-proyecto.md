@@ -1,0 +1,31 @@
+# Estado actual del proyecto — NutriControl-API (ODD)
+
+## Objetivo
+Documentar el estado actual del proyecto tras la migración a Organic Driven Development (ODD), sin artefactos SDD remanentes, y establecer el punto de partida para la siguiente feature.
+
+Branch: `main` (origin: `https://github.com/Alvar0dev/NutriControl-API.git`)
+Delivery strategy: `ask-on-risk` (default)
+Test runner: `go test ./...`
+
+## Specs
+
+S1: "abandonamos la metodología Spec Driven Development (SDD) y operaremos estrictamente bajo el contrato de comportamiento Organic Driven Development (ODD)" — el proyecto ya no usa SDD; los artefactos SDD (`specs/archive/001-persistence-layer/`, 156 líneas) fueron eliminados en commit `0fb5efa`; el directorio `openspec/` nunca existió en este repositorio.
+
+S2: "Centraliza el contexto utilizando exclusivamente Engram y un único archivo de definición" — el contexto vivo se mantiene en Engram (proyecto `nutricontrol-api`) y en este archivo `odd/task/estado-actual-proyecto.md` como único archivo de definición del estado actual.
+
+S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o estado actual del proyecto" — satisfecho por este mismo archivo.
+
+## Tasks
+
+| ID | Linked S# | Route | Status | Commit |
+|----|-----------|-------|--------|--------|
+| T1 | S1 | inline | done | `8a1a47f` feat: validar edad y peso > 0 en crear y actualizar paciente |
+| T2 | S1 | inline | done | `95f019e` docs: completar PROJECT_INDEX.md y DEV_RUNBOOK.md (opción B) |
+| T3 | S2 | inline | done | Engram registro de trabajo del día (mem_save id 11 y 12) |
+| T4 | S3 | inline | done | `odd/task/estado-actual-proyecto.md` (este documento) |
+
+## Log
+
+L1: [usuario] "Actúa como Agente Orquestador. A partir de este momento, abandonamos la metodología Spec Driven Development (SDD) y operaremos estrictamente bajo el contrato de comportamiento Organic Driven Development (ODD). ... Fase 1: Limpieza y Deprecación (SDD)... Fase 2: Nueva Estructura Documental (ODD)... Fase 3: Contrato de Ejecución ODD..."
+
+L2: [asistente] Verificado: `openspec/` no existe; `specs/archive/` está vacío (contenido eliminado en `0fb5efa`); no hay plantillas de especificación sueltas. Creado `odd/task/estado-actual-proyecto.md` como único archivo de definición del estado actual.
