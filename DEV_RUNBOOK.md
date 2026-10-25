@@ -53,8 +53,8 @@ golangci-lint run ./...         # Si se instala
 
 ## 4. Gotchas y peculiaridades
 
-### 4.1 Tests handlers rotos (preexistente)
-`handlers/paciente_test.go` usa `c.Response().Body.Bytes()` — no existe en Echo v4.16.0. No es un bug de los cambios recientes. Para arreglar: usar `httptest.NewRecorder()` directamente y acceder a `rec.Body.Bytes()`.
+### 4.1 Tests handlers (Echo v4) — resuelto en `b3754f1`
+`handlers/paciente_test.go` usaba `c.Response().Body.Bytes()` (eliminado en Echo v4). Se corrigió a `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` en commit `b3754f1`. `go test ./...` pasa: `handlers` y `models` verdes.
 
 ### 4.2 Mock no persiste `ID` por omisión
 `MockPacmanRepository` no setea `ID` al crear (Create devuelve el struct tal cual). Si creas un paciente y luego buscas por ID, no lo encontrarás. Para tests de GetByID/Delete, setea `p.ID` manualmente o actualiza el mock para setearlo.
@@ -77,3 +77,13 @@ NUTRICONTROL_USE_MOCK=true go run ./... &
 curl -s http://localhost:8080/pacientes | jq
 curl -s -X POST http://localhost:8080/pacientes -H 'Content-Type: application/json' -d '{"nombre":"Test","edad":30,"peso":70}' | jq
 ```
+
+## 6. Flujo de commits y convenciones
+- Estilo: **Conventional Commits** (`feat:`, `fix:`, `refactor:`, `docs:`, `build:`, `chore:`).
+- Rama de trabajo: crear feature branch desde `main` antes del primer cambio de fuente; `main` se mantiene estable y verde.
+- Antes de commitear: `go mod tidy` (ajusta `go.sum`), `go build ./...` y `go test ./...`.
+- Push y creación de PR quedan a criterio del usuario bajo política ordinaria del repositorio.
+
+## 7. Próximos pasos (según `todo` en raíz)
+- `B`) Completar `PROJECT_INDEX.md` / `DEV_RUNBOOK.md` (en curso — estado actual documentado en §7 de `PROJECT_INDEX.md`).
+- `C`) Nueva feature: extender repo Firestore/mock o agregar un endpoint nuevo (pendiente de elección en próxima sesión).

@@ -123,4 +123,14 @@ HTTP -> GetPacienteByID -> c.Param("id") -> repo.GetByID -> 200 | 404
 - **Persistencia alternativa (SQL):** la constitución (#4) menciona sqlx. La interfaz `PacienteRepository` es el puente; un nuevo adaptador SQL implementaría la misma interfaz en `pkg/sql/` (no existe todavía).
 - **Validación profunda:** validar edad/peso numéricos (RF-03 de spec antigua) no está implementado — solo `nombre`. Futuro candidate en `internal/validation/` o `models`.
 - **Logging/trazas:** no implementado (out of MVP). Constitución #1 (minimalismo) implica no forzar loggers hasta que la complejidad lo exija.
-- **Tests handlers rotos (Echo v4):** `c.Response().Body` fue eliminado. Tests existentes no compilan. Ver DEV_RUNBOOK §4 "Testing".
+- **Tests handlers (Echo v4):** `c.Response().Body` fue eliminado en Echo v4; se corrigió a `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` en `b3754f1`. `go test ./...` pasa: `handlers` y `models` verdes.
+
+## 7. Estado actual (post `366d4a8` en `main`)
+
+| Área | Estado |
+|------|--------|
+| Código fuente | Intacto, sin cambios pendientes de commit salvo docs |
+| Tests | `go test ./...` verde (`handlers`, `models`) |
+| Docs | `docs/constitution.md` actualizado con contratos ODD; `specs/archive/` eliminado |
+| Seguimiento ODD | `odd/tasks/000-reestructuracion-documental.md` vigente; archivo `todo` en raíz con pendiente para mañana |
+| Pendiente | `B`) completar `PROJECT_INDEX.md` / `DEV_RUNBOOK.md` (en curso); `C`) nueva feature (repo o endpoint) |
