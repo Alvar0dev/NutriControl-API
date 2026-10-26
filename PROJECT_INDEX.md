@@ -61,7 +61,7 @@ Definidas en `handlers/paciente.go :: SetupRoutes`. Formato `{método} {ruta} ->
 | GET | `/` | (inline echo) | — | 200 "API NutriControl Operativa" |
 
 - `{id}` proviene de `c.Param("id")`.
-- Validaciones actuales: `nombre` requerido en POST/PUT. 400 con `{"error": "..."}` si falta.
+- Validaciones actuales: `nombre` requerido en POST/PUT; `edad` y `peso` deben ser > 0 (validados en `handlers.validarPaciente`, commit `8a1a47f`). 400 con `{"error": "..."}` si falta o es inválido.
 - Mock no persiste `ID` por omisión (struct mock no lo setea). Cuidado: busquedas por ID pueden no encontrar mock data.
 
 ## 4. Contratos clave (puertos/adaptadores)
@@ -125,12 +125,14 @@ HTTP -> GetPacienteByID -> c.Param("id") -> repo.GetByID -> 200 | 404
 - **Logging/trazas:** no implementado (out of MVP). Constitución #1 (minimalismo) implica no forzar loggers hasta que la complejidad lo exija.
 - **Tests handlers (Echo v4):** `c.Response().Body` fue eliminado en Echo v4; se corrigió a `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` en `b3754f1`. `go test ./...` pasa: `handlers` y `models` verdes.
 
-## 7. Estado actual (post `366d4a8` en `main`)
+## 7. Estado actual (post `3f78f12` en `main`)
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Intacto, sin cambios pendientes de commit salvo docs |
-| Tests | `go test ./...` verde (`handlers`, `models`) |
-| Docs | `docs/constitution.md` actualizado con contratos ODD; `specs/archive/` eliminado |
-| Seguimiento ODD | `odd/tasks/000-reestructuracion-documental.md` vigente; archivo `todo` en raíz con pendiente para mañana |
-| Pendiente | `B`) completar `PROJECT_INDEX.md` / `DEV_RUNBOOK.md` (en curso); `C`) nueva feature (repo o endpoint) |
+| Código fuente | Intacto, sin cambios pendientes de commit. `go test ./...` verde (`handlers`, `models`). |
+| Tests | Verdes: `handlers` y `models`. Echo v4 `Response.Body` corregido en `b3754f1`. |
+| Docs | `docs/constitution.md` actualizado con contratos ODD; `specs/archive/` eliminado; `PROJECT_INDEX.md` y `DEV_RUNBOOK.md` completados con estado real. |
+| Build / binarios | `nutricontrol.exe` y `*.dll` ignorados vía `.gitignore` (commit `3f78f12`); no se suben al repo. |
+| Config local | `.atl/` ignorado vía `.gitignore` (config local de Gentle AI, no entra al repo). |
+| Seguimiento ODD | `odd/tasks/000-reestructuracion-documental.md` vigente (T1-T4 done); `odd/task/estado-actual-proyecto.md` como único archivo de definición del estado actual. Archivo `todo` raíz resuelto. |
+| Pendiente | `C`) nueva feature: extender repo Firestore/mock o agregar endpoint (pendiente de elección en próxima sesión). |

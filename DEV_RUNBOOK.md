@@ -63,7 +63,7 @@ golangci-lint run ./...         # Si se instala
 El handler mapea cualquier error de `repo.GetByID` a 404. Si Firestore falla por otra razón (red, permisos), el cliente recibe 404 en lugar de 500. No es ideal, pero es la lógica actual.
 
 ### 4.4 Validación mínima
-Solo se valida `nombre != ""`. `edad` y `peso` no se validan (RF-03 de spec antigua no implementada). Acepta `edad=0` o `peso=0`.
+Se valida `nombre != ""`, `edad > 0` y `peso > 0` en `handlers.validarPaciente` (commit `8a1a47f`). 400 con `{"error": "..."}` si falta o es inválido. Ya no se acepta `edad=0` ni `peso=0`.
 
 ### 4.5 `go.sum` grande
 Primera vez que se agrega `cloud.google.com/go/firestore`, `go.sum` crece ~30 líneas. Asegúrate de hacer `go mod tidy` antes de commit.
