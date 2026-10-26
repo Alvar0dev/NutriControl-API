@@ -1,0 +1,8 @@
+node_modules
+
+# Binarios compilados (Go / Windows)
+*.exe
+*.dll
+
+# Configuración local de Gentle AI (pi / agent skills)
+.atl/
