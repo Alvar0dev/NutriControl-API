@@ -1,6 +1,6 @@
 # AGENTS.md - NutriControl API Operational Context (ODD / Gentle Shell)
 
-> Flujo ODD (Organic Driven Development): cambios emergen del código, no de specs rígidas previas. La especificación SDD antigua (`specs/001-persistence-layer/`) está archivada en `specs/archive/`.
+> Flujo ODD (Organic Driven Development): cambios emergen del código, no de specs rígidas previas. La especificación SDD antigua está archivada.
 
 ## Project Summary
 NutriControl API proporciona endpoints para gestión de pacientes (Go + Echo v4). CRUD completo con persistencia Firestore, repositorio abstracto (`PacienteRepository`) y mock para desarrollo/test.
@@ -17,11 +17,24 @@ NutriControl API proporciona endpoints para gestión de pacientes (Go + Echo v4)
 # Run the API server
 go run ./...
 
-# Project structure
+# Test
+go test ./...
+
+# Build
+go build -o nutricontrol.exe ./main.go
+```
+
+## Project structure
+```
 ./main.go           # Entry point and server setup
 ./handlers/         # HTTP handlers and routes
 ./models/           # Domain models
+./pkg/firestore/    # Firestore adapter (repo + mock)
 ./go.mod           # Dependencies
+./PROJECT_INDEX.md  # Navigation, commands, and current state
+./AGENTS.md         # THIS file
+./docs/constitution.md   # Non-negotiable principles
+./odd/task/estado-actual-proyecto.md  # Single ODD state definition
 ```
 
 ## Established Conventions
@@ -31,7 +44,7 @@ go run ./...
 - **Mocking**: Mock repository (`pkg/firestore/mock.go`) + Firestore real (`pkg/firestore/repo.go`).
 - **Inyección**: Repositorio por argumento a handlers (`SetupRoutes`).
 - **Commit Style**: Conventional commits.
-- **Documentación de arranque**: `PROJECT_INDEX.md`, `DEV_RUNBOOK.md`. Especificación SDD archivada (`specs/archive/001-persistence-layer/`).
+- **ODD**: Trabajo small inline sin documentos de feature; trabajo large con `odd/tasks/<feature>.md` + espejo en Engram.
 
 ## Boundaries (No-touch zones without explicit permission)
 - **Data Persistence**: `pkg/firestore/` es la capa de persistencia activa; no crear `data/`, `db/`, `storage/` sin acuerdo.

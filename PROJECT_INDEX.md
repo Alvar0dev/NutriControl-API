@@ -1,10 +1,10 @@
 # PROJECT_INDEX — NutriControl API
 
-> Mapa de navegación arquitectónica para agentes exploradores. No reemplaza a docs/constitution.md ni a specs/*.
+Mapa de navegación, comandos de desarrollo y estado actual del proyecto. No reemplaza a `docs/constitution.md` (principios) ni a `odd/task/estado-actual-proyecto.md` (estado vivo ODD).
 
 ## 1. Propósito y stack
 
-**NutriControl API** es un backend Go minimalista (Echo v4) para la gestión de pacientes nutritionist-controlled. En fase inicial — CRUD de pacientes sobre Firestore, con alternancia mock/emulador.
+**NutriControl API** es un backend Go minimalista (Echo v4) para la gestión de pacientes. CRUD de pacientes sobre Firestore real o mock en memoria.
 
 - **Runtime:** Go 1.26.1
 - **HTTP:** `github.com/labstack/echo/v4` (router + bind + JSON)
@@ -12,44 +12,53 @@
 - **Testing:** `github.com/stretchr/testify` (assert/require)
 - **Inyección:** manual vía argumento a handlers (no DI container).
 
-## 2. Estructura de carpetas (alto nivel)
+## 2. Estructura de carpetas
 
 ```
 nutricontrol/
 ├── main.go                        # Entry point. Setup de Echo + inyección repo.
 ├── go.mod / go.sum                # Módulo `nutricontrol`.
-├── PROJECT_INDEX.md               # ESTE archivo.
-├── DEV_RUNBOOK.md                 # Comandos build/test/env.
-├── AGENTS.md                      # Contexto operativo por día.
+├── PROJECT_INDEX.md               # ESTE archivo: navegación, comandos, estado.
+├── AGENTS.md                      # Contexto operativo breve (arranque rápido).
+├── README.md                      # Bitácora histórica día a día (no editar por sesión).
+├── todo                           # Checklist ligero de la sesión actual.
 ├── handlers/                      # Capa presentation (HTTP).
 │   ├── paciente.go                # Handlers + SetupRoutes (inyecta repo).
-│   └── paciente_test.go           # Tests (rotos: Echo v4 Response.Body).
+│   └── paciente_test.go           # Tests (verdes).
 ├── models/                        # Capa domain (entidades puras, sin deps).
 │   └── paciente.go                # struct Paciente.
+│   └── paciente_test.go           # Test de serialización JSON.
 ├── pkg/
 │   └── firestore/                 # Adaptador Firestore (puerto: PacienteRepository).
 │       ├── paciente_repo.go       # Interfaz PacienteRepository.
-│       ├── repo.go                # Impl Firestore real: NewPacienteFirestoreRepo + CRUD.
-│       └── mock.go                # Impl mock en memoria: NewMockPacienteRepository + CRUD.
-└── docs/
-    ├── constitution.md            # Principios innegociables (hexagonal, testing purista).
-    └── CHANGELOG.md               # Historia de cambios contractuales.
+│       ├── repo.go                # Impl Firestore real.
+│       └── mock.go                # Impl mock en memoria.
+├── docs/
+│   ├── constitution.md            # Principios innegociables (hexagonal, testing, minimalismo).
+│   ├── CHANGELOG.md               # Historia de cambios contractuales.
+│   └── organizacion-documentacion.md  # Mapa de esta documentación y porqué.
+└── odd/
+    ├── task/
+    │   └── estado-actual-proyecto.md  # Único archivo de definición de estado actual (ODD).
+    └── tasks/
+        └── archive/               # Feature trackings cerrados (no se editan).
 ```
 
 - `models/` = dominio. Sin dependencias externas. `Paciente` es el único agregado.
-- `pkg/firestore/` = adaptador de persistencia. Expone la interfaz + dos implementaciones (real + mock). Es el puente entre dominio y Firestore, no un "service".
+- `pkg/firestore/` = adaptador de persistencia. Expone la interfaz + dos implementaciones (real + mock).
 - `handlers/` = orquestación HTTP. Recibe `firestore.PacienteRepository` por argumento; no construye el repo.
 
 ## 3. Entry points
 
 ### 3.1 Arranque — `main.go`
-- Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
+
+Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
+
 - Si mock → `firestore.NewMockPacienteRepository()`.
 - Si real → `firestore.NewPacienteFirestoreRepo(ctx, projectID)` (falla abiertamente si no hay credenciales GCP).
 - Registra rutas vía `handlers.SetupRoutes(e, repo)`.
 
 ### 3.2 Rutas (contrato API)
-Definidas en `handlers/paciente.go :: SetupRoutes`. Formato `{método} {ruta} -> handler`.
 
 | Método | Ruta | Handler | Repo método | Éxito |
 |--------|------|---------|-------------|-------|
@@ -61,29 +70,29 @@ Definidas en `handlers/paciente.go :: SetupRoutes`. Formato `{método} {ruta} ->
 | GET | `/` | (inline echo) | — | 200 "API NutriControl Operativa" |
 
 - `{id}` proviene de `c.Param("id")`.
-- Validaciones actuales: `nombre` requerido en POST/PUT; `edad` y `peso` deben ser > 0 (validados en `handlers.validarPaciente`, commit `8a1a47f`). 400 con `{"error": "..."}` si falta o es inválido.
-- Mock no persiste `ID` por omisión (struct mock no lo setea). Cuidado: busquedas por ID pueden no encontrar mock data.
+- Validaciones: `nombre` requerido; `edad` y `peso` deben ser > 0 (commit `8a1a47f`). 400 con `{"error": "..."}` si falta o es inválido.
 
-## 4. Contratos clave (puertos/adaptadores)
+## 4. Contratos clave
 
 ### 4.1 Puerta `PacienteRepository` — `pkg/firestore/paciente_repo.go`
-Interfaz de repositorio (el "puerto"). Los handlers dependen SOLO de ella, no de la impl.
 
 ```go
 type PacienteRepository interface {
-    Create(ctx, models.Paciente) (*models.Paciente, error)
-    GetAll(ctx) ([]models.Paciente, error)
-    GetByID(ctx, id) (*models.Paciente, error)
-    Update(ctx, id, models.Paciente) (*models.Paciente, error)
-    Delete(ctx, id) error
+    Create(ctx context.Context, p models.Paciente) (*models.Paciente, error)
+    GetAll(ctx context.Context) ([]models.Paciente, error)
+    GetByID(ctx context.Context, id string) (*models.Paciente, error)
+    Update(ctx context.Context, id string, p models.Paciente) (*models.Paciente, error)
+    Delete(ctx context.Context, id string) error
 }
 ```
 
 ### 4.2 Adaptadores
-- **Firestore real** (`pkg/firestore/repo.go`): `PacienteFirestoreRepo`. `NewPacienteFirestoreRepo(ctx, projectID)` falla si `option.WithEndpoint("firestore.googleapis.com:443")` no resuelve credenciales. Métodos: Create/Add doc, GetAll/itera Documents, GetByID/doc.Get, Update/Set, Delete/Doc(id).Delete.
-- **Mock** (`pkg/firestore/mock.go`): `MockPacienteRepository`. Store en `[]models.Paciente` (slice, no persiste entre arranques). NOTA: `Update` corrige índice del slice (antes bug de variable local). `Delete` re-slicea preservando orden.
+
+- **Firestore real** (`pkg/firestore/repo.go`): `PacienteFirestoreRepo`.
+- **Mock** (`pkg/firestore/mock.go`): `MockPacienteRepository`. Store en `[]models.Paciente` (no persiste entre arranques).
 
 ### 4.3 Modelo de dominio — `models/paciente.go`
+
 ```go
 type Paciente struct {
     ID              string  `json:"id,omitempty"`
@@ -94,45 +103,54 @@ type Paciente struct {
     Notas           string  `json:"notas"`
 }
 ```
-- Es el DTO y la entidad. Una sola fuente de verdad para schema JSON y Firestore.
-- Regla de negocio crítica (refs en handler + model): `nombre` obligatorio en POST/PUT. La entidad misma no valida (validación en handlers → ver constitución prin. 2).
 
-## 5. Flujo de datos crítico (request → persistencia)
+## 5. Comandos de desarrollo
 
-### Flujo típico `POST /pacientes`:
+### 5.1 Dependencias
+```bash
+go mod tidy            # Limpia go.mod/go.sum
 ```
-HTTP client
-  -> Echo router (handlers.SetupRoutes)
-  -> CreatePaciente(c, repo)
-     -> c.Bind(&models.Paciente)            # Echo decodea JSON a entidad dominio
-     -> VALIDACIÓN (nombre != "")           # 400 Bad Request si falla
-     -> repo.Create(ctx, paciente)          # ← IYECCIÓN: solo conoce la interfaz
-        -> [Firestore] col.Add(doc)         # docRef.ID asignado por Firestore
-        -> paciente.ID = docRef.ID          # se setea id de vuelta en la entidad
-     -> 201 Created JSON {id, ...}
-```
-- Punto de sustitución para testing: pasar `MockPacienteRepository` en lugar del Firestore real. Ver `handlers/paciente_test.go` (usa mock).
 
-### Flujo típico `GET /pacientes/{id}`:
+### 5.2 Build / Run
+```bash
+go build -o nutricontrol.exe ./main.go   # Windows
+go run ./...                              # Ejecuta main.go (puerto :8080)
 ```
-HTTP -> GetPacienteByID -> c.Param("id") -> repo.GetByID -> 200 | 404
+
+### 5.3 Testing
+```bash
+go test ./...                    # Todos los paquetes
+go test -v ./handlers/           # Solo handlers
+go test -v ./models/             # Solo models
+go test -cover ./...             # Con cobertura
+go vet ./...                     # Verificación estándar
 ```
-- Firestore GetByID falla con error genérico si Firestore devuelve not-found; el handler mapea a 404 con mensaje. El mock falla con error de "no se encontró" → también 404. **Importante:** ambos adapters devuelven error en "no existe", el handler unifica a 404.
 
-## 6. Puntos de sustitución / extensiones conocidos
-- **Persistencia alternativa (SQL):** la constitución (#4) menciona sqlx. La interfaz `PacienteRepository` es el puente; un nuevo adaptador SQL implementaría la misma interfaz en `pkg/sql/` (no existe todavía).
-- **Validación profunda:** validar edad/peso numéricos (RF-03 de spec antigua) no está implementado — solo `nombre`. Futuro candidate en `internal/validation/` o `models`.
-- **Logging/trazas:** no implementado (out of MVP). Constitución #1 (minimalismo) implica no forzar loggers hasta que la complejidad lo exija.
-- **Tests handlers (Echo v4):** `c.Response().Body` fue eliminado en Echo v4; se corrigió a `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` en `b3754f1`. `go test ./...` pasa: `handlers` y `models` verdes.
+**Estado actual:** `go test ./...` verde (`handlers`, `models`).
 
-## 7. Estado actual (post `3f78f12` en `main`)
+### 5.4 Variables de entorno
+
+| Variable | Obligatorio | Valor | Propósito |
+|----------|-------------|-------|-----------|
+| `NUTRICONTROL_USE_MOCK` | No | `true` | Forzar mock en memoria. |
+| `GCP_PROJECT_ID` | No | `<id>` | ID proyecto GCP para Firestore real. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | No | `/path/cred.json` | Credenciales de servicio GCP. |
+
+## 6. Estado actual (post `272b7cb` en `main`)
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Intacto, sin cambios pendientes de commit. `go test ./...` verde (`handlers`, `models`). |
-| Tests | Verdes: `handlers` y `models`. Echo v4 `Response.Body` corregido en `b3754f1`. |
-| Docs | `docs/constitution.md` actualizado con contratos ODD; `specs/archive/` eliminado; `PROJECT_INDEX.md` y `DEV_RUNBOOK.md` completados con estado real. |
-| Build / binarios | `nutricontrol.exe` y `*.dll` ignorados vía `.gitignore` (commit `3f78f12`); no se suben al repo. |
-| Config local | `.atl/` ignorado vía `.gitignore` (config local de Gentle AI, no entra al repo). |
-| Seguimiento ODD | `odd/tasks/000-reestructuracion-documental.md` vigente (T1-T4 done); `odd/task/estado-actual-proyecto.md` como único archivo de definición del estado actual. Archivo `todo` raíz resuelto. |
-| Pendiente | `C`) nueva feature: extender repo Firestore/mock o agregar endpoint (pendiente de elección en próxima sesión). |
+| Código fuente | Intacto, sin cambios pendientes de commit. |
+| Tests | `go test ./...` verde (`handlers`, `models`). |
+| Build | `go build ./...` OK. |
+| Docs | `PROJECT_INDEX.md` consolidado (navegación + comandos + estado). `DEV_RUNBOOK.md` archivado. |
+| Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente (único archivo de definición de estado actual). |
+| Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
+| Pendiente | Nueva feature: extender repo Firestore/mock o agregar endpoint (opción C). |
+
+## 7. Flujo de commits
+
+- Estilo: **Conventional Commits** (`feat:`, `fix:`, `refactor:`, `docs:`, `build:`, `chore:`).
+- Rama de trabajo: crear feature branch desde `main` antes del primer cambio de fuente.
+- Antes de commitear: `go mod tidy`, `go build ./...`, `go test ./...`.
+- Push y creación de PR quedan a criterio del usuario bajo política ordinaria del repositorio.
