@@ -63,7 +63,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | Método | Ruta | Handler | Repo método | Éxito |
 |--------|------|---------|-------------|-------|
 | GET | `/pacientes` | GetPacientes | GetAll | 200 OK `[Paciente]` |
-| POST | `/pacientes` | CreatePaciente | Create | 201 Created `Paciente` |
+| POST | `/pacientes` | CreatePaciente | Create | 201 Created `Paciente` (el mock asigna `ID` si viene vacío) |
 | GET | `/pacientes/{id}` | GetPacienteByID | GetByID | 200 OK `Paciente` / 404 |
 | PUT | `/pacientes/{id}` | UpdatePaciente | Update | 200 OK `Paciente` / 404 |
 | DELETE | `/pacientes/{id}` | DeletePaciente | Delete | 204 No Content / 404 |
@@ -136,17 +136,17 @@ go vet ./...                     # Verificación estándar
 | `GCP_PROJECT_ID` | No | `<id>` | ID proyecto GCP para Firestore real. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | `/path/cred.json` | Credenciales de servicio GCP. |
 
-## 6. Estado actual (post `272b7cb` en `main`)
+## 6. Estado actual (post `65b514d` en `feat/getbyid-tests-y-mock-id`)
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Intacto, sin cambios pendientes de commit. |
-| Tests | `go test ./...` verde (`handlers`, `models`). |
-| Build | `go build ./...` OK. |
-| Docs | `PROJECT_INDEX.md` consolidado (navegación + comandos + estado). `DEV_RUNBOOK.md` archivado. |
+| Código fuente | Sin cambios pendientes en la rama. `main` queda en `b98f2a5`. |
+| Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). |
+| Build | `go build ./...` y `go vet ./...` OK. |
+| Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente (único archivo de definición de estado actual). |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
-| Pendiente | Nueva feature: extender repo Firestore/mock o agregar endpoint (opción C). |
+| Pendiente | Opción C: endpoint nuevo (definir cuál). A y B cerradas. |
 
 ## 7. Flujo de commits
 
