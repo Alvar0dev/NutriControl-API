@@ -3,13 +3,16 @@ package firestore
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
+
 	"nutricontrol/models"
 )
 
 // MockPacienteRepository implementa PacienteRepository sin llamar Firestore.
 // Usado en tests para verificar que handlers interactúan correctamente con el repositorio.
 type MockPacienteRepository struct {
-	store []models.Paciente
+	store  []models.Paciente
+	nextID int64
 }
 
 func NewMockPacienteRepository() *MockPacienteRepository {
@@ -18,10 +21,14 @@ func NewMockPacienteRepository() *MockPacienteRepository {
 			{Nombre: "Juan Perez", Edad: 30, Peso: 75.5, PorcentajeGrasa: 18.5, Notas: "Primera consulta"},
 			{Nombre: "Maria Gomez", Edad: 25, Peso: 62.0, PorcentajeGrasa: 22.0, Notas: "Seguimiento mensual"},
 		},
+		nextID: 100,
 	}
 }
 
 func (m *MockPacienteRepository) Create(ctx context.Context, p models.Paciente) (*models.Paciente, error) {
+	if p.ID == "" {
+		p.ID = fmt.Sprintf("paciente-%d", atomic.AddInt64(&m.nextID, 1))
+	}
 	m.store = append(m.store, p)
 	return &p, nil
 }
