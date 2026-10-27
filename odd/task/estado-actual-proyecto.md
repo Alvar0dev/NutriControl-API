@@ -23,9 +23,18 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T2 | S1 | inline | done | `95f019e` docs: completar PROJECT_INDEX.md y DEV_RUNBOOK.md (opción B) |
 | T3 | S2 | inline | done | Engram registro de trabajo del día (mem_save id 11 y 12) |
 | T4 | S3 | inline | done | `odd/task/estado-actual-proyecto.md` (este documento) |
+| T5 | S1 | inline | done | `65b514d` feat: tests de GetPacienteByID y mock asigna ID al crear |
 
 ## Log
 
 L1: [usuario] "Actúa como Agente Orquestador. A partir de este momento, abandonamos la metodología Spec Driven Development (SDD) y operaremos estrictamente bajo el contrato de comportamiento Organic Driven Development (ODD). ... Fase 1: Limpieza y Deprecación (SDD)... Fase 2: Nueva Estructura Documental (ODD)... Fase 3: Contrato de Ejecución ODD..."
 
 L2: [asistente] Verificado: `openspec/` no existe; `specs/archive/` está vacío (contenido eliminado en `0fb5efa`); no hay plantillas de especificación sueltas. Creado `odd/task/estado-actual-proyecto.md` como único archivo de definición del estado actual.
+
+L3: [usuario] Hoy: hacer A (GetByID con tests) y B (mock asigne ID al crear), actualizar documentación con lo hecho y dificultades encontradas, simplificar docs y que no parezcan de IA.
+
+L4: [asistente] Implementado en branch `feat/getbyid-tests-y-mock-id`, commit `65b514d`.
+- Tests de handler `GetPacienteByID`: 200 OK con paciente existente y 404 cuando no existe.
+- `MockPacienteRepository.Create` asigna `paciente-<n>` automáticamente cuando `ID` está vacío; respeta el ID si ya viene.
+- Dificultad: ninguna relevante. Los tests de handler necesitan `context.Background()` y `setParam` para inyectar el path param `{id}` directamente en el contexto de Echo v4.
+- `go test ./...`, `go vet ./...` y `go build ./...` verdes.

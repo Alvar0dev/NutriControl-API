@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -206,4 +207,54 @@ func TestSetupRoutes(t *testing.T) {
 
 	// Assert: las rutas deben estar registradas (no fallan al montar)
 	assert.NotNil(t, e.Routes())
+}
+
+func TestGetPacienteByIDOK(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Ana Lopez", Edad: 28, Peso: 68.5})
+	require.NoError(t, err)
+	require.NotEmpty(t, creado.ID)
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID, nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", creado.ID)
+
+	// Act
+	err = GetPacienteByID(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var p models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &p)
+	require.NoError(t, err)
+	assert.Equal(t, creado.ID, p.ID)
+	assert.Equal(t, "Ana Lopez", p.Nombre)
+	assert.Equal(t, 28, p.Edad)
+	assert.Equal(t, 68.5, p.Peso)
+}
+
+func TestGetPacienteByIDNoEncontrado(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/inexistente", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", "inexistente")
+
+	// Act
+	err := GetPacienteByID(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "No se encontró paciente")
 }
