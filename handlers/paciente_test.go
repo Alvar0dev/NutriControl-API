@@ -237,6 +237,28 @@ func TestGetPacienteByIDOK(t *testing.T) {
 	assert.Equal(t, 68.5, p.Peso)
 }
 
+func TestGetPacientesFiltrarPorNombre(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	req := httptest.NewRequest(http.MethodGet, "/pacientes?nombre=juan", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := GetPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 1)
+	assert.Equal(t, "Juan Perez", pacientes[0].Nombre)
+}
+
 func TestGetPacienteByIDNoEncontrado(t *testing.T) {
 	// Arrange
 	e := newTestEcho()

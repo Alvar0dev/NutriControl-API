@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -11,10 +12,21 @@ import (
 )
 
 // GetPacientes obtiene todos los pacientes mediante el repositorio.
+// Soporta filtro opcional por nombre (?nombre=, coincidencia parcial, sin distinción de mayúsculas).
 func GetPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 	pacientes, err := repo.GetAll(c.Request().Context())
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
+	}
+	if nombre := c.QueryParam("nombre"); nombre != "" {
+		buscado := strings.ToLower(nombre)
+		filtrados := pacientes[:0]
+		for _, p := range pacientes {
+			if strings.Contains(strings.ToLower(p.Nombre), buscado) {
+				filtrados = append(filtrados, p)
+			}
+		}
+		pacientes = filtrados
 	}
 	return c.JSON(http.StatusOK, pacientes)
 }
