@@ -24,6 +24,8 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T3 | S2 | inline | done | Engram registro de trabajo del día (mem_save id 11 y 12) |
 | T4 | S3 | inline | done | `odd/task/estado-actual-proyecto.md` (este documento) |
 | T5 | S1 | inline | done | `65b514d` feat: tests de GetPacienteByID y mock asigna ID al crear |
+| T6 | S1 | inline | done | `9102ca9` feat: filtrar pacientes por nombre en GET /pacientes |
+| T7 | S1 | inline | done | `b98f2a5` docs: simplificar organización de documentación según ODD |
 
 ## Log
 
@@ -38,3 +40,8 @@ L4: [asistente] Implementado en branch `feat/getbyid-tests-y-mock-id`, commit `6
 - `MockPacienteRepository.Create` asigna `paciente-<n>` automáticamente cuando `ID` está vacío; respeta el ID si ya viene.
 - Dificultad: ninguna relevante. Los tests de handler necesitan `context.Background()` y `setParam` para inyectar el path param `{id}` directamente en el contexto de Echo v4.
 - `go test ./...`, `go vet ./...` y `go build ./...` verdes.
+
+L5: [asistente] Implementado C.3: `GET /pacientes?nombre=` con filtro por nombre (coincidencia parcial, sin distinción de mayúsculas/minúsculas). Commit `9102ca9 feat: filtrar pacientes por nombre en GET /pacientes`. Test: `TestGetPacientesFiltrarPorNombre`.
+
+L6: [usuario] Hoy: documentar todo el proceso (C.2 y C.3) en la documentación del proceso con los errores encontrados como si fuera yo quien lo hubiera hecho, commitear y pushear.
+L7: [asistente] Actualizado `PROJECT_INDEX.md` (sección 6 con estado C.2/C.3 + nueva sección 6.2 dificultades encontradas y resoluciones), `docs/CHANGELOG.md` (versión 1.0.1 con entradas C.2 y C.3), `docs/archive/DEV_RUNBOOK.md` (gotcha 4.2 marcado como resuelto), `odd/task/estado-actual-proyecto.md` (tasks T6/T7 y log L5-L7), `AGENTS.md` (Current Architecture). Todos los cambios commiteados y pusheados a `main`.

@@ -56,8 +56,8 @@ golangci-lint run ./...         # Si se instala
 ### 4.1 Tests handlers (Echo v4) — resuelto en `b3754f1`
 `handlers/paciente_test.go` usaba `c.Response().Body.Bytes()` (eliminado en Echo v4). Se corrigió a `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` en commit `b3754f1`. `go test ./...` pasa: `handlers` y `models` verdes.
 
-### 4.2 Mock no persiste `ID` por omisión
-`MockPacmanRepository` no setea `ID` al crear (Create devuelve el struct tal cual). Si creas un paciente y luego buscas por ID, no lo encontrarás. Para tests de GetByID/Delete, setea `p.ID` manualmente o actualiza el mock para setearlo.
+### 4.2 Mock asigne ID automático al crear — resuelto en `65b514d`
+`MockPacienteRepository.Create` ahora asigna `paciente-<n>` automáticamente cuando `p.ID` viene vacío, usando `atomic.AddInt64(&m.nextID, 1)`. Respeta el ID si ya viene seteado. Si creas un paciente sin ID y luego buscas por ID, lo encontrarás. Se implementaron además `GetByID`, `Update` y `Delete` en el mock.
 
 ### 4.3 Firestore GetByID falla con error genérico
 El handler mapea cualquier error de `repo.GetByID` a 404. Si Firestore falla por otra razón (red, permisos), el cliente recibe 404 en lugar de 500. No es ideal, pero es la lógica actual.
