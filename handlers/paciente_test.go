@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -279,4 +280,201 @@ func TestGetPacienteByIDNoEncontrado(t *testing.T) {
 	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.Contains(t, resp["error"], "No se encontró paciente")
+}
+
+func TestSearchPacientesSinFiltros(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/search", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := SearchPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	// Default limit=10, offset=0 -> todos los 2 pacientes seed
+	assert.Len(t, pacientes, 2)
+}
+
+func TestSearchPacientesFiltrarPorNombre(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/search?nombre=juan", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := SearchPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 1)
+	assert.Equal(t, "Juan Perez", pacientes[0].Nombre)
+}
+
+func TestSearchPacientesFiltrarPorEdadMinMax(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	// Juan: 30, Maria: 25
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/search?edad_min=28&edad_max=35", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := SearchPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 1)
+	assert.Equal(t, "Juan Perez", pacientes[0].Nombre)
+}
+
+func TestSearchPacientesFiltrarPorPesoMinMax(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	// Juan: 75.5, Maria: 62.0
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/search?peso_min=70&peso_max=80", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := SearchPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 1)
+	assert.Equal(t, "Juan Perez", pacientes[0].Nombre)
+}
+
+func TestSearchPacientesPaginacionLimitOffset(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	// Crear 3 pacientes más para tener 5 total
+	for i := 0; i < 3; i++ {
+		_, _ = repo.Create(context.Background(), models.Paciente{
+			Nombre: fmt.Sprintf("Paciente Extra %d", i),
+			Edad:  20 + i,
+			Peso:  60.0 + float64(i),
+		})
+	}
+	// limit=2, offset=1 -> debe devolver 2 pacientes (segundo y tercero)
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/search?limit=2&offset=1", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := SearchPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 2)
+}
+
+func TestSearchPacientesValoresPorDefectoLimitOffset(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	// Crear 15 pacientes total (2 seed + 13 nuevos)
+	for i := 0; i < 13; i++ {
+		_, _ = repo.Create(context.Background(), models.Paciente{
+			Nombre: fmt.Sprintf("Paciente %d", i),
+			Edad:  20,
+			Peso:  60.0,
+		})
+	}
+	// Sin limit/offset -> default limit=10, offset=0 -> 10 pacientes
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/search", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := SearchPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 10)
+}
+
+func TestSearchPacientesResultadoVacio(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	// Nombre que no existe
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/search?nombre=inexistente", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := SearchPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 0)
+}
+
+func TestSearchPacientesCombinadoFiltros(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	// Juan: 30 años, 75.5kg
+	// Maria: 25 años, 62.0kg
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/search?edad_min=20&edad_max=40&peso_min=60&peso_max=70", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := SearchPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	// Solo Maria cumple: edad 25 (20-40) y peso 62 (60-70)
+	assert.Len(t, pacientes, 1)
+	assert.Equal(t, "Maria Gomez", pacientes[0].Nombre)
 }

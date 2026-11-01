@@ -67,6 +67,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | GET | `/pacientes/{id}` | GetPacienteByID | GetByID | 200 OK `Paciente` / 404 |
 | PUT | `/pacientes/{id}` | UpdatePaciente | Update | 200 OK `Paciente` / 404 |
 | DELETE | `/pacientes/{id}` | DeletePaciente | Delete | 204 No Content / 404 |
+| GET | `/pacientes/search` | SearchPacientes | GetAll + filtro en memoria | 200 OK `[Paciente]` paginado |
 | GET | `/` | (inline echo) | — | 200 "API NutriControl Operativa" |
 
 - `{id}` proviene de `c.Param("id")`.
@@ -136,7 +137,7 @@ go vet ./...                     # Verificación estándar
 | `GCP_PROJECT_ID` | No | `<id>` | ID proyecto GCP para Firestore real. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | `/path/cred.json` | Credenciales de servicio GCP. |
 
-## 6. Estado actual (post C.2 y C.3)
+## 6. Estado actual (post C.4)
 
 | Área | Estado |
 |------|--------|
@@ -146,7 +147,7 @@ go vet ./...                     # Verificación estándar
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente (único archivo de definición de estado actual). |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
-| Pendiente | Opción C: otra feature nueva (definir cuál). A y B cerradas. |
+| Pendiente | C.4 completada. C.5: definir la siguiente feature (endpoints, persistencia, etc.). A, B, C.1-C.4 cerradas. |
 
 ### 6.1 Features C.2 y C.3 (completadas)
 

@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -28,6 +29,107 @@ func GetPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 		}
 		pacientes = filtrados
 	}
+	return c.JSON(http.StatusOK, pacientes)
+}
+
+// SearchPacientes busca pacientes por múltiples criterios con paginación.
+// Query params:
+//   - nombre: coincidencia parcial, sin distinción de mayúsculas/minúsculas
+//   - edad_min, edad_max: rango inclusivo de edad
+//   - peso_min, peso_max: rango inclusivo de peso
+//   - limit: máximo resultados (default 10)
+//   - offset: salto de resultados (default 0)
+func SearchPacientes(c echo.Context, repo firestore.PacienteRepository) error {
+	pacientes, err := repo.GetAll(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
+	}
+
+	// Filtro por nombre (coincidencia parcial, case-insensitive)
+	if nombre := c.QueryParam("nombre"); nombre != "" {
+		buscado := strings.ToLower(nombre)
+		filtrados := pacientes[:0]
+		for _, p := range pacientes {
+			if strings.Contains(strings.ToLower(p.Nombre), buscado) {
+				filtrados = append(filtrados, p)
+			}
+		}
+		pacientes = filtrados
+	}
+
+	// Filtro por rango de edad
+	if edadMinStr := c.QueryParam("edad_min"); edadMinStr != "" {
+		if edadMin, err := strconv.Atoi(edadMinStr); err == nil {
+			filtrados := pacientes[:0]
+			for _, p := range pacientes {
+				if p.Edad >= edadMin {
+					filtrados = append(filtrados, p)
+				}
+			}
+			pacientes = filtrados
+		}
+	}
+	if edadMaxStr := c.QueryParam("edad_max"); edadMaxStr != "" {
+		if edadMax, err := strconv.Atoi(edadMaxStr); err == nil {
+			filtrados := pacientes[:0]
+			for _, p := range pacientes {
+				if p.Edad <= edadMax {
+					filtrados = append(filtrados, p)
+				}
+			}
+			pacientes = filtrados
+		}
+	}
+
+	// Filtro por rango de peso
+	if pesoMinStr := c.QueryParam("peso_min"); pesoMinStr != "" {
+		if pesoMin, err := strconv.ParseFloat(pesoMinStr, 64); err == nil {
+			filtrados := pacientes[:0]
+			for _, p := range pacientes {
+				if p.Peso >= pesoMin {
+					filtrados = append(filtrados, p)
+				}
+			}
+			pacientes = filtrados
+		}
+	}
+	if pesoMaxStr := c.QueryParam("peso_max"); pesoMaxStr != "" {
+		if pesoMax, err := strconv.ParseFloat(pesoMaxStr, 64); err == nil {
+			filtrados := pacientes[:0]
+			for _, p := range pacientes {
+				if p.Peso <= pesoMax {
+					filtrados = append(filtrados, p)
+				}
+			}
+			pacientes = filtrados
+		}
+	}
+
+	// Paginación: limit (default 10) y offset (default 0)
+	limit := 10
+	offset := 0
+	if limitStr := c.QueryParam("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	if offsetStr := c.QueryParam("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	// Aplicar paginación
+	if offset >= len(pacientes) {
+		pacientes = []models.Paciente{}
+	} else {
+		end := offset + limit
+		if end > len(pacientes) {
+			end = len(pacientes)
+		}
+		pacientes = pacientes[offset:end]
+	}
+
 	return c.JSON(http.StatusOK, pacientes)
 }
 
@@ -123,5 +225,8 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.DELETE("/pacientes/{id}", func(c echo.Context) error {
 		return DeletePaciente(c, repo)
+	})
+	e.GET("/pacientes/search", func(c echo.Context) error {
+		return SearchPacientes(c, repo)
 	})
 }
