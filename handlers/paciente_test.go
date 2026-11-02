@@ -198,6 +198,62 @@ func TestUpdatePacientePesoInvalido(t *testing.T) {
 	assert.Contains(t, resp["error"], "peso")
 }
 
+func TestUpdatePacienteOK(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Ana Lopez", Edad: 28, Peso: 68.5, PorcentajeGrasa: 24.0, Notas: "Nueva consulta"})
+	require.NoError(t, err)
+	require.NotEmpty(t, creado.ID)
+
+	payload := `{"nombre":"Ana Lopez Updated","edad":30,"peso":70.0,"porcentaje_grasa":25.0,"notas":"Control mensual"}`
+	req := httptest.NewRequest(http.MethodPut, "/pacientes/"+creado.ID, strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", creado.ID)
+
+	// Act
+	err = UpdatePaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var actualizado models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &actualizado)
+	require.NoError(t, err)
+	assert.Equal(t, creado.ID, actualizado.ID)
+	assert.Equal(t, "Ana Lopez Updated", actualizado.Nombre)
+	assert.Equal(t, 30, actualizado.Edad)
+	assert.Equal(t, 70.0, actualizado.Peso)
+	assert.Equal(t, 25.0, actualizado.PorcentajeGrasa)
+	assert.Equal(t, "Control mensual", actualizado.Notas)
+}
+
+func TestUpdatePacienteNoEncontrado(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+
+	payload := `{"nombre":"Inexistente","edad":30,"peso":70.0}`
+	req := httptest.NewRequest(http.MethodPut, "/pacientes/inexistente", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", "inexistente")
+
+	// Act
+	err := UpdatePaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "No se encontró paciente")
+}
+
 func TestSetupRoutes(t *testing.T) {
 	// Arrange
 	e := newTestEcho()
