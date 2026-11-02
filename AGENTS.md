@@ -13,6 +13,7 @@ NutriControl API proporciona endpoints para gestión de pacientes (Go + Echo v4)
 - **State**: Persistencia operativa, CRUD completo (`GET/POST/PUT/DELETE` por ID). Tests presentes (`handlers/`, `models/`).
 - **Mock**: `Create` asigna `paciente-<n>` automáticamente cuando `p.ID` está vacío (contador atómico `nextID`). Respeta el ID si ya viene. `GetByID`, `Update` y `Delete` implementados sobre el store en memoria.
 - **Filtro nombre**: `GET /pacientes?nombre=` filtra por coincidencia parcial, sin distinción de mayúsculas/minúsculas.
+- **Stats**: `GET /pacientes/stats` devuelve resumen de solo lectura: `total`, `edad_promedio`, `peso_promedio`, `porcentaje_grasa_promedio`, `edades[]`, `pesos[]`.
 
 ## Key Commands
 ```bash

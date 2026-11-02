@@ -1,5 +1,13 @@
 # CHANGELOG.md
 
+## Versión 1.0.2 - 2026-11-02
+
+### [C.5] Endpoint `GET /pacientes/stats` (resumen de solo lectura)
+- `StatsPacientes` devuelve `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` agregando en memoria sobre `repo.GetAll`. Solo lectura, no modifica datos.
+- Ruta `GET /pacientes/stats` registrada en `SetupRoutes`.
+- Tests agregados: `TestStatsPacientesOK` y `TestStatsPacientesListaVacia`.
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes.
+
 ## Versión 1.0.1 - 2026-10-26
 
 ### [C.2] Mock asigne ID autoincremental al crear + GetByID/Delete

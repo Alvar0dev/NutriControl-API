@@ -68,6 +68,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | PUT | `/pacientes/{id}` | UpdatePaciente | Update | 200 OK `Paciente` / 404 |
 | DELETE | `/pacientes/{id}` | DeletePaciente | Delete | 204 No Content / 404 |
 | GET | `/pacientes/search` | SearchPacientes | GetAll + filtro en memoria | 200 OK `[Paciente]` paginado |
+| GET | `/pacientes/stats` | StatsPacientes | GetAll + agregación en memoria | 200 OK `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` |
 | GET | `/` | (inline echo) | — | 200 "API NutriControl Operativa" |
 
 - `{id}` proviene de `c.Param("id")`.
@@ -141,13 +142,13 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Sin cambios pendientes en la rama. `main` queda en `9102ca9`. |
+| Código fuente | Sin cambios pendientes en la rama. `main` queda en `a4675bb` (C.4) + C.5 pendiente de commit. |
 | Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). |
 | Build | `go build ./...` y `go vet ./...` OK. |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente (único archivo de definición de estado actual). |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
-| Pendiente | C.4 completada. C.5: definir la siguiente feature (endpoints, persistencia, etc.). A, B, C.1-C.4 cerradas. |
+| Pendiente | C.5: `GET /pacientes/stats` implementada y testeada, pendiente de commit. A, B, C.1-C.4 cerradas. |
 
 ### 6.1 Features C.2 y C.3 (completadas)
 
@@ -184,6 +185,14 @@ go vet ./...                     # Verificación estándar
 **4. go.sum grande tras agregar `cloud.google.com/go/firestore`**
 - **Síntoma:** `go.sum` crecía ~30 líneas la primera vez que se resolvía la dependencia de Firestore real.
 - **Resolución:** Ejecutar `go mod tidy` antes de commitear para que `go.mod` y `go.sum` queden consistentes.
+
+### 6.3 Feature C.5: `GET /pacientes/stats` (resumen de solo lectura)
+
+- `StatsPacientes` devuelve `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` agregando en memoria sobre `repo.GetAll`. No modifica datos ni toca contratos existentes.
+- Ruta `GET /pacientes/stats` registrada en `SetupRoutes`.
+- Tests: `TestStatsPacientesOK` (2 pacientes del mock: total 2, edad promedio 27.5, peso 68.75, grasa 20.25) y `TestStatsPacientesListaVacia` (repositorio vacío → ceros y listas vacías).
+- **Dificultad encontrada:** ninguna nueva. Se reutilizan los mismos patrones de test que C.4 (`httptest.NewRequest`, `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()`).
+- Commit pendiente: C.5 implementada y testeada, a espera de commit y push.
 
 ## 7. Flujo de commits
 

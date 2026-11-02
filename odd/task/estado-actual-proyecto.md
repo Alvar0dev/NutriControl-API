@@ -26,6 +26,8 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T5 | S1 | inline | done | `65b514d` feat: tests de GetPacienteByID y mock asigna ID al crear |
 | T6 | S1 | inline | done | `9102ca9` feat: filtrar pacientes por nombre en GET /pacientes |
 | T7 | S1 | inline | done | `b98f2a5` docs: simplificar organización de documentación según ODD |
+| T8 | S1 | inline | done | `a4675bb` feat: endpoint GET /pacientes/search con filtros y paginación (C.4) |
+| T9 | S1 | inline | done | C.5: `GET /pacientes/stats` resumen de solo lectura (pendiente de commit) |
 
 ## Log
 
@@ -45,3 +47,5 @@ L5: [asistente] Implementado C.3: `GET /pacientes?nombre=` con filtro por nombre
 
 L6: [usuario] Hoy: documentar todo el proceso (C.2 y C.3) en la documentación del proceso con los errores encontrados como si fuera yo quien lo hubiera hecho, commitear y pushear.
 L7: [asistente] Actualizado `PROJECT_INDEX.md` (sección 6 con estado C.2/C.3 + nueva sección 6.2 dificultades encontradas y resoluciones), `docs/CHANGELOG.md` (versión 1.0.1 con entradas C.2 y C.3), `docs/archive/DEV_RUNBOOK.md` (gotcha 4.2 marcado como resuelto), `odd/task/estado-actual-proyecto.md` (tasks T6/T7 y log L5-L7), `AGENTS.md` (Current Architecture). Todos los cambios commiteados y pusheados a `main`.
+
+L8: [asistente] Implementado C.5: `GET /pacientes/stats` resumen de solo lectura (total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]). Handler en `handlers/paciente.go`, ruta registrada en `SetupRoutes`. Tests `TestStatsPacientesOK` y `TestStatsPacientesListaVacia` en `handlers/paciente_test.go`. Documentación: `PROJECT_INDEX.md` (tabla de rutas + sección 6.3), `docs/CHANGELOG.md` (v1.0.2), `AGENTS.md` (Current Architecture), `odd/task/estado-actual-proyecto.md` (task T9). `go test ./...`, `go vet ./...`, `go build ./...` verdes. Pendiente de commit y push.

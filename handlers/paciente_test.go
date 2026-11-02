@@ -454,6 +454,72 @@ func TestSearchPacientesResultadoVacio(t *testing.T) {
 	assert.Len(t, pacientes, 0)
 }
 
+func TestStatsPacientesOK(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/stats", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := StatsPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var stats struct {
+		Total                  int     `json:"total"`
+		EdadPromedio           float64 `json:"edad_promedio"`
+		PesoPromedio           float64 `json:"peso_promedio"`
+		PorcentajeGrasaPromedio float64 `json:"porcentaje_grasa_promedio"`
+		Edades                 []int   `json:"edades"`
+		Pesos                  []float64 `json:"pesos"`
+	}
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &stats)
+	require.NoError(t, err)
+	assert.Equal(t, 2, stats.Total)
+	assert.Equal(t, 27.5, stats.EdadPromedio)
+	assert.Equal(t, 68.75, stats.PesoPromedio)
+	assert.Equal(t, 20.25, stats.PorcentajeGrasaPromedio)
+	assert.Equal(t, []int{25, 30}, stats.Edades)
+	assert.Equal(t, []float64{62.0, 75.5}, stats.Pesos)
+}
+
+func TestStatsPacientesListaVacia(t *testing.T) {
+	// Arrange: repositorio sin pacientes (mock nuevo sin seed)
+	e := newTestEcho()
+	repo := &firestore.MockPacienteRepository{}
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/stats", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := StatsPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var stats struct {
+		Total                  int     `json:"total"`
+		EdadPromedio           float64 `json:"edad_promedio"`
+		PesoPromedio           float64 `json:"peso_promedio"`
+		PorcentajeGrasaPromedio float64 `json:"porcentaje_grasa_promedio"`
+		Edades                 []int   `json:"edades"`
+		Pesos                  []float64 `json:"pesos"`
+	}
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &stats)
+	require.NoError(t, err)
+	assert.Equal(t, 0, stats.Total)
+	assert.Equal(t, 0.0, stats.EdadPromedio)
+	assert.Equal(t, 0.0, stats.PesoPromedio)
+	assert.Equal(t, 0.0, stats.PorcentajeGrasaPromedio)
+	assert.Len(t, stats.Edades, 0)
+	assert.Len(t, stats.Pesos, 0)
+}
+
 func TestSearchPacientesCombinadoFiltros(t *testing.T) {
 	// Arrange
 	e := newTestEcho()

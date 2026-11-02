@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -133,6 +134,43 @@ func SearchPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 	return c.JSON(http.StatusOK, pacientes)
 }
 
+// StatsPacientes devuelve un resumen de solo lectura de los pacientes:
+// total, promedios de edad, peso y porcentaje de grasa, y listas ordenadas de edades y pesos.
+func StatsPacientes(c echo.Context, repo firestore.PacienteRepository) error {
+	pacientes, err := repo.GetAll(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
+	}
+
+	total := len(pacientes)
+	var edadPromedio, pesoPromedio, grasaPromedio float64
+	edades := make([]int, 0, total)
+	pesos := make([]float64, 0, total)
+	for _, p := range pacientes {
+		edadPromedio += float64(p.Edad)
+		pesoPromedio += p.Peso
+		grasaPromedio += p.PorcentajeGrasa
+		edades = append(edades, p.Edad)
+		pesos = append(pesos, p.Peso)
+	}
+	if total > 0 {
+		edadPromedio /= float64(total)
+		pesoPromedio /= float64(total)
+		grasaPromedio /= float64(total)
+	}
+	sort.Ints(edades)
+	sort.Float64s(pesos)
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"total":                    total,
+		"edad_promedio":            edadPromedio,
+		"peso_promedio":            pesoPromedio,
+		"porcentaje_grasa_promedio": grasaPromedio,
+		"edades":                   edades,
+		"pesos":                    pesos,
+	})
+}
+
 // validarPaciente verifica las reglas de negocio mínimas: nombre, edad y peso > 0.
 func validarPaciente(p models.Paciente) error {
 	if p.Nombre == "" {
@@ -228,5 +266,8 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.GET("/pacientes/search", func(c echo.Context) error {
 		return SearchPacientes(c, repo)
+	})
+	e.GET("/pacientes/stats", func(c echo.Context) error {
+		return StatsPacientes(c, repo)
 	})
 }
