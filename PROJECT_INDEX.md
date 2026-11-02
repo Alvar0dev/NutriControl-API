@@ -142,13 +142,13 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Sin cambios pendientes en la rama. `main` queda en `a4675bb` (C.4) + C.5 pendiente de commit. |
+| Código fuente | Sin cambios pendientes en la rama. `main` queda en `85ed67f` (C.6) + documentación de C.5/C.6 pendiente de este commit (PROJECT_INDEX.md, CHANGELOG.md, AGENTS.md, odd/task/estado-actual-proyecto.md, odd/tasks/feature-c4-search.md). |
 | Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). |
 | Build | `go build ./...` y `go vet ./...` OK. |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente (único archivo de definición de estado actual). |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
-| Pendiente | C.5: `GET /pacientes/stats` implementada y testeada, pendiente de commit. A, B, C.1-C.4 cerradas. |
+| Pendiente | Commitear documentación de C.5/C.6 y `odd/tasks/feature-c4-search.md`, luego push a origin/main. A, B, C.1-C.6 cerradas. |
 
 ### 6.1 Features C.2 y C.3 (completadas)
 
@@ -165,7 +165,7 @@ go vet ./...                     # Verificación estándar
 - Test: `handlers/paciente_test.go` (`TestGetPacientesFiltrarPorNombre`).
 - Commit: `9102ca9 feat: filtrar pacientes por nombre en GET /pacientes`.
 
-### 6.2 Dificultades encontradas y cómo las resolví
+### 6.2 Dificultades encontradas y cómo las resolví (movidas al final, sección 6.6)
 
 **1. `c.Response().Body.Bytes()` no compila en Echo v4 (handlers de test)**
 - **Síntoma:** `go test ./...` fallaba en `handlers/paciente_test.go` con error de compilación: `c.Response.Body undefined (type *echo.Response has no field or method Body)`.
@@ -186,15 +186,64 @@ go vet ./...                     # Verificación estándar
 - **Síntoma:** `go.sum` crecía ~30 líneas la primera vez que se resolvía la dependencia de Firestore real.
 - **Resolución:** Ejecutar `go mod tidy` antes de commitear para que `go.mod` y `go.sum` queden consistentes.
 
-### 6.3 Feature C.5: `GET /pacientes/stats` (resumen de solo lectura)
+### 6.3 Feature C.4: `GET /pacientes/search` (búsqueda con filtros y paginación)
+
+- `SearchPacientes` filtra por `nombre` (parcial, case-insensitive), `edad_min`/`edad_max`, `peso_min`/`peso_max`, y pagina con `limit` (default 10) / `offset` (default 0). Usa `repo.GetAll` y filtra en memoria, igual que `GetPacientes`, sin tocar la interfaz `PacienteRepository`.
+- Ruta `GET /pacientes/search` registrada en `SetupRoutes`.
+- Tests: `TestSearchPacientesSinFiltros`, `TestSearchPacientesFiltrarPorNombre`, `TestSearchPacientesFiltrarPorEdadMinMax`, `TestSearchPacientesFiltrarPorPesoMinMax`, `TestSearchPacientesPaginacionLimitOffset`, `TestSearchPacientesValoresPorDefectoLimitOffset`, `TestSearchPacientesResultadoVacio`, `TestSearchPacientesCombinadoFiltros` (8 tests).
+- Commit: `a4675bb feat: endpoint GET /pacientes/search con filtros y paginación (C.4)`. Pusheado a `origin/main`.
+
+### 6.4 Feature C.5: `GET /pacientes/stats` (resumen de solo lectura)
 
 - `StatsPacientes` devuelve `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` agregando en memoria sobre `repo.GetAll`. No modifica datos ni toca contratos existentes.
 - Ruta `GET /pacientes/stats` registrada en `SetupRoutes`.
 - Tests: `TestStatsPacientesOK` (2 pacientes del mock: total 2, edad promedio 27.5, peso 68.75, grasa 20.25) y `TestStatsPacientesListaVacia` (repositorio vacío → ceros y listas vacías).
 - **Dificultad encontrada:** ninguna nueva. Se reutilizan los mismos patrones de test que C.4 (`httptest.NewRequest`, `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()`).
-- Commit pendiente: C.5 implementada y testeada, a espera de commit y push.
+- Commit: `f06b5aa feat: endpoint GET /pacientes/stats con resumen de solo lectura (C.5)`. Pusheado a `origin/main`.
 
-## 7. Flujo de commits
+### 6.5 Feature C.6: `PUT /pacientes/{id}` (actualizar paciente con validación)
+
+**¿Qué se hizo y por qué:**
+El handler `UpdatePaciente` y la ruta `PUT /pacientes/{id}` ya existían desde la versión 1.0.0 (commit `8a1a47f`), con validación de ID y delegación al repositorio `Update`. Lo que faltaba para cerrar C.6 eran los **tests de éxito (200) y no encontrado (404)**. Se agregaron porque sin ellos el endpoint no tenía cobertura de su caso principal: actualizar un paciente existente y devolverlo con los datos nuevos, ni el caso de error cuando el ID no existe.
+
+**Cambios realizados:**
+- `handlers/paciente_test.go`: agregados `TestUpdatePacienteOK` y `TestUpdatePacienteNoEncontrado`.
+  - `TestUpdatePacienteOK`: crea un paciente con `repo.Create` (el mock le asigna `paciente-101`), luego llama `UpdatePaciente` con payload nuevo y verifica `200 OK`, que `ID` se conserva y que `nombre`, `edad`, `peso`, `porcentaje_grasa` y `notas` se actualizan.
+  - `TestUpdatePacienteNoEncontrado`: llama `UpdatePaciente` con ID `inexistente` y verifica `404 Not Found` con mensaje `"No se encontró paciente"`.
+- Los tests preexistentes `TestUpdatePacienteEdadInvalida` y `TestUpdatePacientePesoInvalido` cubren la validación de negocio (`edad <= 0` y `peso <= 0` → `400 Bad Request`).
+
+**¿Por qué se hace así (diseño):**
+- El mock `Update` modifica el paciente en `m.store` por índice y lo devuelve, así que el handler solo necesita pasar el ID de `c.Param("id")` y el cuerpo parseado. No hay lógica extra en el handler: valida, delega al repo, devuelve el resultado.
+- El helper `setParam` (reflect + unsafe.Pointer) es necesario porque los tests invocan el handler directamente, sin pasar por el router de Echo, por lo que `c.Param("id")` estaría vacío sin esta inyección.
+
+**Tests de C.6:**
+- `TestUpdatePacienteOK` (200, datos actualizados)
+- `TestUpdatePacienteNoEncontrado` (404, ID inexistente)
+- `TestUpdatePacienteEdadInvalida` (400, edad <= 0)
+- `TestUpdatePacientePesoInvalido` (400, peso <= 0)
+
+**Commit:** `85ed67f feat: completar C.6 PUT /pacientes/{id} con tests de éxito y no encontrado` (commit local, aún no pusheado a `origin/main`).
+
+### 6.6 Dificultades encontradas y cómo las resolví
+
+**1. `c.Response().Body.Bytes()` no compila en Echo v4 (handlers de test)**
+- **Síntoma:** `go test ./...` fallaba en `handlers/paciente_test.go` con error de compilación: `c.Response.Body undefined (type *echo.Response has no field or method Body)`.
+- **Causa:** Echo v4 eliminó el campo `.Body` de `*echo.Response`. El cuerpo de respuesta en tests se lee ahora a través del `httptest.ResponseRecorder`.
+- **Resolución:** Reemplacé `c.Response().Body.Bytes()` por `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` en las 3 ocurrencias del test. Commit `b3754f1` (fix).
+
+**2. Parámetros de ruta (`c.Param("id")`) no disponibles al llamar handlers directamente en tests**
+- **Síntoma:** Al invocar `GetPacienteByID`, `UpdatePaciente` o `DeletePaciente` directamente desde el test (sin pasar por el router de Echo), `c.Param("id")` devolvía string vacío.
+- **Causa:** Echo v4 almacena los parámetros de ruta en campos no exportados `pnames []string` y `pvalues []string` del contexto. Cuando el handler se llama directo, esos campos están vacíos.
+- **Resolución:** Creé el helper `setParam(c echo.Context, key, value string)` que usa `reflect` + `unsafe.Pointer` para inyectar `pnames`/`pvalues` directamente en el contexto de Echo v4. Se usa en `TestUpdatePacienteEdadInvalida`, `TestUpdatePacientePesoInvalido`, `TestGetPacienteByIDOK` y `TestGetPacienteByIDNoEncontrado`.
+
+**3. `MockPacienteRepository.Create` no asignaba ID al crear (bloqueaba GetByID/Delete sobre datos nuevos)**
+- **Síntoma:** Al crear un paciente sin ID y luego intentar `GetByID` o `Delete`, el paciente no se encontraba porque `ID` quedó vacío.
+- **Causa:** El mock devolvía el paciente tal cual sin asignarle un identificador automático.
+- **Resolución:** Agregué contador atómico `nextID` en `MockPacienteRepository` y lógica en `Create` para asignar `paciente-<n>` cuando `p.ID == ""`, respetando el ID si ya viene seteado.
+
+**4. go.sum grande tras agregar `cloud.google.com/go/firestore`**
+- **Síntoma:** `go.sum` crecía ~30 líneas la primera vez que se resolvía la dependencia de Firestore real.
+- **Resolución:** Ejecutar `go mod tidy` antes de commitear para que `go.mod` y `go.sum` queden consistentes.
 
 - Estilo: **Conventional Commits** (`feat:`, `fix:`, `refactor:`, `docs:`, `build:`, `chore:`).
 - Rama de trabajo: crear feature branch desde `main` antes del primer cambio de fuente.

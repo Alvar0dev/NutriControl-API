@@ -1,5 +1,26 @@
 # CHANGELOG.md
 
+## Versión 1.0.3 - 2026-11-02
+
+### [C.6] Completar `PUT /pacientes/{id}` con tests de éxito y no encontrado
+
+**¿Qué se hizo y por qué:**
+El handler `UpdatePaciente` y la ruta `PUT /pacientes/{id}` ya existían desde la versión 1.0.0, con validación de ID (`c.Param("id")`) y delegación al repositorio `Update`. Lo que faltaba para cerrar C.6 eran los **tests de éxito (200) y no encontrado (404)**, porque sin ellos el endpoint no tenía cobertura de su caso principal: actualizar un paciente existente y devolverlo con los datos nuevos, ni el caso de error cuando el ID no existe.
+
+**Tests agregados en `handlers/paciente_test.go`:**
+- `TestUpdatePacienteOK`: crea un paciente con `repo.Create` (el mock le asigna `paciente-<n>`), luego llama `UpdatePaciente` con payload nuevo y verifica `200 OK`, que `ID` se conserva y que `nombre`, `edad`, `peso`, `porcentaje_grasa` y `notas` se actualizan.
+- `TestUpdatePacienteNoEncontrado`: llama `UpdatePaciente` con ID `inexistente` y verifica `404 Not Found` con mensaje `"No se encontró paciente"`.
+
+**Tests preexistentes que cubren la validación de negocio:**
+- `TestUpdatePacienteEdadInvalida`: `edad <= 0` → `400 Bad Request` con mensaje sobre `edad`.
+- `TestUpdatePacientePesoInvalido`: `peso <= 0` → `400 Bad Request` con mensaje sobre `peso`.
+
+**Diseño:**
+- El mock `Update` modifica el paciente en `m.store` por índice y lo devuelve, así que el handler solo pasa el ID de `c.Param("id")` y el cuerpo parseado. Valida, delega al repo, devuelve el resultado.
+- El helper `setParam` (reflect + unsafe.Pointer) inyecta `pnames`/`pvalues` en el contexto de Echo v4 para que `c.Param("id")` funcione cuando el test invoca el handler directo, sin pasar por el router.
+- Commit: `85ed67f feat: completar C.6 PUT /pacientes/{id} con tests de éxito y no encontrado`.
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes.
+
 ## Versión 1.0.2 - 2026-11-02
 
 ### [C.5] Endpoint `GET /pacientes/stats` (resumen de solo lectura)
