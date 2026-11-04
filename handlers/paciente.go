@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -222,6 +224,68 @@ func UpdatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	return c.JSON(http.StatusOK, pacienteActualizado)
 }
 
+// PatchPaciente aplica una actualización parcial sobre un paciente existente.
+// Solo se modifican los campos enviados en el body; los demás se conservan.
+// Body acepta cualquier subconjunto de: nombre, edad, peso, porcentaje_grasa, notas.
+func PatchPaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+	}
+
+	// Obtener el paciente existente
+	existente, err := repo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+
+	// Leer y parsear el body como mapa para aplicar solo los campos enviados
+	body, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+	var cambios map[string]any
+	if err := json.Unmarshal(body, &cambios); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+
+	// Aplicar solo los campos que vinieron en el body
+	if nombre, ok := cambios["nombre"]; ok {
+		existente.Nombre = nombre.(string)
+	}
+	if edad, ok := cambios["edad"]; ok {
+		if e, ok := edad.(float64); ok {
+			if e <= 0 {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'edad' debe ser mayor que 0"})
+			}
+			existente.Edad = int(e)
+		}
+	}
+	if peso, ok := cambios["peso"]; ok {
+		if p, ok := peso.(float64); ok {
+			if p <= 0 {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'peso' debe ser mayor que 0"})
+			}
+			existente.Peso = p
+		}
+	}
+	if grasa, ok := cambios["porcentaje_grasa"]; ok {
+		if g, ok := grasa.(float64); ok {
+			existente.PorcentajeGrasa = g
+		}
+	}
+	if notas, ok := cambios["notas"]; ok {
+		existente.Notas = notas.(string)
+	}
+
+	existente.ID = id
+	pacienteActualizado, err := repo.Update(c.Request().Context(), id, *existente)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+	return c.JSON(http.StatusOK, pacienteActualizado)
+}
+
 // GetPacienteByID obtiene un paciente por su ID.
 func GetPacienteByID(c echo.Context, repo firestore.PacienteRepository) error {
 	id := c.Param("id")
@@ -260,6 +324,9 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.PUT("/pacientes/{id}", func(c echo.Context) error {
 		return UpdatePaciente(c, repo)
+	})
+	e.PATCH("/pacientes/{id}", func(c echo.Context) error {
+		return PatchPaciente(c, repo)
 	})
 	e.DELETE("/pacientes/{id}", func(c echo.Context) error {
 		return DeletePaciente(c, repo)

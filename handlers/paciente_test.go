@@ -254,6 +254,125 @@ func TestUpdatePacienteNoEncontrado(t *testing.T) {
 	assert.Contains(t, resp["error"], "No se encontró paciente")
 }
 
+// TestPatchPacienteOK: actualización parcial, solo nombre cambia.
+func TestPatchPacienteOK(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Ana Lopez", Edad: 28, Peso: 68.5, PorcentajeGrasa: 24.0, Notas: "Nueva consulta"})
+	require.NoError(t, err)
+	require.NotEmpty(t, creado.ID)
+
+	payload := `{"nombre":"Ana Lopez Modificada"}`
+	req := httptest.NewRequest(http.MethodPatch, "/pacientes/"+creado.ID, strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", creado.ID)
+
+	// Act
+	err = PatchPaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var actualizado models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &actualizado)
+	require.NoError(t, err)
+	assert.Equal(t, creado.ID, actualizado.ID)
+	assert.Equal(t, "Ana Lopez Modificada", actualizado.Nombre)
+	assert.Equal(t, 28, actualizado.Edad)
+	assert.Equal(t, 68.5, actualizado.Peso)
+	assert.Equal(t, 24.0, actualizado.PorcentajeGrasa)
+	assert.Equal(t, "Nueva consulta", actualizado.Notas)
+}
+
+// TestPatchPacienteSoloPeso: solo el peso se actualiza, el resto se conserva.
+func TestPatchPacienteSoloPeso(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Ana Lopez", Edad: 28, Peso: 68.5, PorcentajeGrasa: 24.0, Notas: "Nueva consulta"})
+	require.NoError(t, err)
+	require.NotEmpty(t, creado.ID)
+
+	payload := `{"peso":72.0}`
+	req := httptest.NewRequest(http.MethodPatch, "/pacientes/"+creado.ID, strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", creado.ID)
+
+	// Act
+	err = PatchPaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var actualizado models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &actualizado)
+	require.NoError(t, err)
+	assert.Equal(t, creado.ID, actualizado.ID)
+	assert.Equal(t, "Ana Lopez", actualizado.Nombre)
+	assert.Equal(t, 28, actualizado.Edad)
+	assert.Equal(t, 72.0, actualizado.Peso)
+	assert.Equal(t, 24.0, actualizado.PorcentajeGrasa)
+	assert.Equal(t, "Nueva consulta", actualizado.Notas)
+}
+
+// TestPatchPacienteNoEncontrado: ID inexistente -> 404.
+func TestPatchPacienteNoEncontrado(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+
+	payload := `{"nombre":"Inexistente"}`
+	req := httptest.NewRequest(http.MethodPatch, "/pacientes/inexistente", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", "inexistente")
+
+	// Act
+	err := PatchPaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "No se encontró paciente")
+}
+
+// TestPatchPacienteEdadInvalida: edad <= 0 enviado -> 400.
+func TestPatchPacienteEdadInvalida(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Ana Lopez", Edad: 28, Peso: 68.5})
+	require.NoError(t, err)
+	require.NotEmpty(t, creado.ID)
+
+	payload := `{"edad":0}`
+	req := httptest.NewRequest(http.MethodPatch, "/pacientes/"+creado.ID, strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", creado.ID)
+
+	// Act
+	err = PatchPaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "edad")
+}
+
 func TestSetupRoutes(t *testing.T) {
 	// Arrange
 	e := newTestEcho()

@@ -66,6 +66,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | POST | `/pacientes` | CreatePaciente | Create | 201 Created `Paciente` (el mock asigna `ID` si viene vacío) |
 | GET | `/pacientes/{id}` | GetPacienteByID | GetByID | 200 OK `Paciente` / 404 |
 | PUT | `/pacientes/{id}` | UpdatePaciente | Update | 200 OK `Paciente` / 404 |
+| PATCH | `/pacientes/{id}` | PatchPaciente | GetByID + Update | 200 OK `Paciente` / 404 / 400 |
 | DELETE | `/pacientes/{id}` | DeletePaciente | Delete | 204 No Content / 404 |
 | GET | `/pacientes/search` | SearchPacientes | GetAll + filtro en memoria | 200 OK `[Paciente]` paginado |
 | GET | `/pacientes/stats` | StatsPacientes | GetAll + agregación en memoria | 200 OK `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` |
@@ -142,13 +143,13 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Sin cambios pendientes en la rama. `main` queda en `85ed67f` (C.6) + documentación de C.5/C.6 pendiente de este commit (PROJECT_INDEX.md, CHANGELOG.md, AGENTS.md, odd/task/estado-actual-proyecto.md, odd/tasks/feature-c4-search.md). |
-| Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). |
+| Código fuente | Sin cambios pendientes en la rama. `main` en `85ed67f` (C.6) + `9cd2b80` (docs C.5/C.6). Nuevo: `PATCH /pacientes/{id}` (actualización parcial) implementado y testeado. |
+| Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). Incluye 4 tests de PATCH parcial. |
 | Build | `go build ./...` y `go vet ./...` OK. |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
-| Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente (único archivo de definición de estado actual). |
+| Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente (único archivo de definición de estado actual). `odd/tasks/feature-c4-search.md` archivado en `odd/tasks/archive/`. |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
-| Pendiente | Commitear documentación de C.5/C.6 y `odd/tasks/feature-c4-search.md`, luego push a origin/main. A, B, C.1-C.6 cerradas. |
+| Pendiente | Push de commits C.5/C.6 y PATCH parcial a origin/main. |
 
 ### 6.1 Features C.2 y C.3 (completadas)
 
@@ -244,6 +245,15 @@ El handler `UpdatePaciente` y la ruta `PUT /pacientes/{id}` ya existían desde l
 **4. go.sum grande tras agregar `cloud.google.com/go/firestore`**
 - **Síntoma:** `go.sum` crecía ~30 líneas la primera vez que se resolvía la dependencia de Firestore real.
 - **Resolución:** Ejecutar `go mod tidy` antes de commitear para que `go.mod` y `go.sum` queden consistentes.
+
+### 6.7 Feature PATCH parcial: `PATCH /pacientes/{id}` (actualización parcial)
+
+- `PatchPaciente` en `handlers/paciente.go`: aplica solo los campos enviados en el body (nombre, edad, peso, porcentaje_grasa, notas). Los campos no enviados se conservan.
+- Requiere que el paciente exista (`GetByID`), si no existe devuelve 404.
+- Valida `edad > 0` y `peso > 0` solo cuando esos campos se envían; 400 si inválidos.
+- Ruta `PATCH /pacientes/{id}` registrada en `SetupRoutes`.
+- Tests: `TestPatchPacienteOK` (200, solo nombre cambia), `TestPatchPacienteSoloPeso` (200, solo peso cambia), `TestPatchPacienteNoEncontrado` (404), `TestPatchPacienteEdadInvalida` (400).
+- Commit pendiente: `feat: agregar PATCH /pacientes/{id} actualización parcial`.
 
 - Estilo: **Conventional Commits** (`feat:`, `fix:`, `refactor:`, `docs:`, `build:`, `chore:`).
 - Rama de trabajo: crear feature branch desde `main` antes del primer cambio de fuente.
