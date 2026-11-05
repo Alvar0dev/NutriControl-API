@@ -1,5 +1,19 @@
 # CHANGELOG.md
 
+## Versión 1.0.4 - 2026-11-02
+
+### PATCH `PATCH /pacientes/{id}` (actualización parcial)
+
+- `PatchPaciente` en `handlers/paciente.go`: aplica solo los campos enviados en el body (nombre, edad, peso, porcentaje_grasa, notas). Los campos no enviados se conservan.
+- Requiere que el paciente exista (`GetByID`), si no existe devuelve 404.
+- Valida `edad > 0` y `peso > 0` solo cuando esos campos se envían; 400 si inválidos.
+- Ruta `PATCH /pacientes/{id}` registrada en `SetupRoutes`.
+- Tests agregados: `TestPatchPacienteOK`, `TestPatchPacienteSoloPeso`, `TestPatchPacienteNoEncontrado`, `TestPatchPacienteEdadInvalida`.
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes.
+- Commit: `9c6f605 feat: agregar PATCH /pacientes/{id} actualización parcial y archivar tracking C.4`.
+- Tracking ODD archivado: `odd/tasks/feature-c4-search.md` movido a `odd/tasks/archive/`.
+- Estado sincronizado en `odd/task/estado-actual-proyecto.md` (T11 + L10) y `PROJECT_INDEX.md`.
+
 ## Versión 1.0.3 - 2026-11-02
 
 ### [C.6] Completar `PUT /pacientes/{id}` con tests de éxito y no encontrado

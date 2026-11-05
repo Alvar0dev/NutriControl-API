@@ -10,7 +10,7 @@ NutriControl API proporciona endpoints para gestión de pacientes (Go + Echo v4)
 - **Web Framework**: Echo v4.16.0
 - **Structure**: Domain (`models/`) / HTTP (`handlers/`) / Adaptador (`pkg/firestore/`).
 - **Persistence**: Firestore (`pkg/firestore/repo.go`, `paciente_repo.go`) con mock (`mock.go`).
-- **State**: Persistencia operativa, CRUD completo (`GET/POST/PUT/DELETE` por ID). Tests presentes (`handlers/`, `models/`).
+- **State**: Persistencia operativa, CRUD completo (`GET/POST/PUT/PATCH/DELETE` por ID). Tests presentes (`handlers/`, `models/`).
 - **Mock**: `Create` asigna `paciente-<n>` automáticamente cuando `p.ID` está vacío (contador atómico `nextID`). Respeta el ID si ya viene. `GetByID`, `Update` y `Delete` implementados sobre el store en memoria.
 - **Filtro nombre**: `GET /pacientes?nombre=` filtra por coincidencia parcial, sin distinción de mayúsculas/minúsculas.
 - **Search**: `GET /pacientes/search` con filtros `nombre` (parcial, case-insensitive), `edad_min`/`edad_max`, `peso_min`/`peso_max`, y paginación `limit` (default 10) / `offset` (default 0). Filtro en memoria sobre `repo.GetAll`.
