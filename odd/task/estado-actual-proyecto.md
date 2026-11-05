@@ -29,6 +29,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T8 | S1 | inline | done | `a4675bb` feat: endpoint GET /pacientes/search con filtros y paginación (C.4) |
 | T9 | S1 | inline | done | `f06b5aa` feat: endpoint GET /pacientes/stats con resumen de solo lectura (C.5) |
 | T10 | S1 | inline | done | `85ed67f` feat: completar C.6 PUT /pacientes/{id} con tests de éxito y no encontrado |
+| T11 | S1 | inline | done | `9c6f605` feat: agregar PATCH /pacientes/{id} actualización parcial + archivar tracking C.4 |
 
 ## Log
 
@@ -52,3 +53,6 @@ L7: [asistente] Actualizado `PROJECT_INDEX.md` (sección 6 con estado C.2/C.3 + 
 L8: [asistente] Implementado C.5: `GET /pacientes/stats` resumen de solo lectura (total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]). Handler en `handlers/paciente.go`, ruta registrada en `SetupRoutes`. Tests `TestStatsPacientesOK` y `TestStatsPacientesListaVacia` en `handlers/paciente_test.go`. Documentación: `PROJECT_INDEX.md` (tabla de rutas + sección 6.3), `docs/CHANGELOG.md` (v1.0.2), `AGENTS.md` (Current Architecture), `odd/task/estado-actual-proyecto.md` (task T9). `go test ./...`, `go vet ./...`, `go build ./...` verdes. Commit `f06b5aa` + pusheado a `origin/main`.
 
 L9: [asistente] Completado C.6: `PUT /pacientes/{id}` (actualizar paciente con validación). Handler `UpdatePaciente` y ruta ya existían (v1.0.0). Se agregaron tests faltantes `TestUpdatePacienteOK` (200 con datos actualizados) y `TestUpdatePacienteNoEncontrado` (404 ID inexistente). Tests de validación preexistentes `TestUpdatePacienteEdadInvalida` y `TestUpdatePacientePesoInvalido` (400). `go test ./...`, `go vet ./...`, `go build ./...` verdes. Commit `85ed67f` en local (pendiente de push). Documentación pendiente de commitear (PROJECT_INDEX.md, CHANGELOG.md, AGENTS.md, odd/task/estado-actual-proyecto.md, odd/tasks/feature-c4-search.md).
+
+L10: [usuario] "haz A y B Luego actualiza la documentacion, comitéalo y pusalo."
+L10: [asistente] A: movido `odd/tasks/feature-c4-search.md` a `odd/tasks/archive/`. B: implementado `PATCH /pacientes/{id}` (actualización parcial, solo campos enviados) test-first con 4 tests (`TestPatchPacienteOK`, `TestPatchPacienteSoloPeso`, `TestPatchPacienteNoEncontrado`, `TestPatchPacienteEdadInvalida`). `go test ./...`, `go build ./...`, `go vet ./...` verdes. Documentación actualizada: `PROJECT_INDEX.md` (tabla de rutas + sección 6.7), `AGENTS.md` (Current Architecture), `odd/task/estado-actual-proyecto.md` (T11 + L10). Commit `9c6f605 feat: agregar PATCH /pacientes/{id} actualización parcial y archivar tracking C.4` + pusheado a `origin/main`. Rama limpia, working tree limpio.
