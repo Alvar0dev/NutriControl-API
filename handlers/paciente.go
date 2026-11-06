@@ -15,10 +15,29 @@ import (
 	"nutricontrol/pkg/firestore"
 )
 
+// paginacionDesdeQuery lee limit y offset de los query params con sus valores por defecto.
+func paginacionDesdeQuery(c echo.Context) (limit, offset int) {
+	limit = 10
+	offset = 0
+	if limitStr := c.QueryParam("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	if offsetStr := c.QueryParam("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+	return limit, offset
+}
+
 // GetPacientes obtiene todos los pacientes mediante el repositorio.
-// Soporta filtro opcional por nombre (?nombre=, coincidencia parcial, sin distinción de mayúsculas).
+// Soporta filtro opcional por nombre (?nombre=, coincidencia parcial, sin distinción de mayúsculas)
+// y paginación nativa del repositorio (?limit, ?offset).
 func GetPacientes(c echo.Context, repo firestore.PacienteRepository) error {
-	pacientes, err := repo.GetAll(c.Request().Context())
+	limit, offset := paginacionDesdeQuery(c)
+	pacientes, err := repo.GetAll(c.Request().Context(), limit, offset)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
 	}
@@ -43,7 +62,8 @@ func GetPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 //   - limit: máximo resultados (default 10)
 //   - offset: salto de resultados (default 0)
 func SearchPacientes(c echo.Context, repo firestore.PacienteRepository) error {
-	pacientes, err := repo.GetAll(c.Request().Context())
+	limit, offset := paginacionDesdeQuery(c)
+	pacientes, err := repo.GetAll(c.Request().Context(), limit, offset)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
 	}
@@ -108,38 +128,14 @@ func SearchPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 		}
 	}
 
-	// Paginación: limit (default 10) y offset (default 0)
-	limit := 10
-	offset := 0
-	if limitStr := c.QueryParam("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
-		}
-	}
-	if offsetStr := c.QueryParam("offset"); offsetStr != "" {
-		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
-			offset = o
-		}
-	}
-
-	// Aplicar paginación
-	if offset >= len(pacientes) {
-		pacientes = []models.Paciente{}
-	} else {
-		end := offset + limit
-		if end > len(pacientes) {
-			end = len(pacientes)
-		}
-		pacientes = pacientes[offset:end]
-	}
-
 	return c.JSON(http.StatusOK, pacientes)
 }
 
 // StatsPacientes devuelve un resumen de solo lectura de los pacientes:
 // total, promedios de edad, peso y porcentaje de grasa, y listas ordenadas de edades y pesos.
 func StatsPacientes(c echo.Context, repo firestore.PacienteRepository) error {
-	pacientes, err := repo.GetAll(c.Request().Context())
+	limit, offset := paginacionDesdeQuery(c)
+	pacientes, err := repo.GetAll(c.Request().Context(), limit, offset)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
 	}

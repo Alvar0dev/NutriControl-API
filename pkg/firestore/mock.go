@@ -33,8 +33,21 @@ func (m *MockPacienteRepository) Create(ctx context.Context, p models.Paciente) 
 	return &p, nil
 }
 
-func (m *MockPacienteRepository) GetAll(ctx context.Context) ([]models.Paciente, error) {
-	return m.store, nil
+func (m *MockPacienteRepository) GetAll(ctx context.Context, limit, offset int) ([]models.Paciente, error) {
+	total := len(m.store)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return []models.Paciente{}, nil
+	}
+	end := total
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	result := make([]models.Paciente, end-offset)
+	copy(result, m.store[offset:end])
+	return result, nil
 }
 
 // GetByID recupera un paciente por ID desde el mock.

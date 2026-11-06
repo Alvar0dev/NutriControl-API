@@ -41,10 +41,23 @@ func (r *PacienteFirestoreRepo) Create(ctx context.Context, p models.Paciente) (
 	return &p, nil
 }
 
-// GetAll recupera todos los pacientes de Firestore.
-func (r *PacienteFirestoreRepo) GetAll(ctx context.Context) ([]models.Paciente, error) {
+// GetAll recupera pacientes de Firestore aplicando paginación nativa (limit/offset).
+// Cuando limit <= 0 no se aplica límite; cuando offset <= 0 no se aplica offset.
+func (r *PacienteFirestoreRepo) GetAll(ctx context.Context, limit, offset int) ([]models.Paciente, error) {
 	var pacientes []models.Paciente
-	iter := r.col.Documents(ctx)
+
+	var iter *firestore.DocumentIterator
+	switch {
+	case limit > 0 && offset > 0:
+		iter = r.col.Limit(limit).Offset(offset).Documents(ctx)
+	case limit > 0:
+		iter = r.col.Limit(limit).Documents(ctx)
+	case offset > 0:
+		iter = r.col.Offset(offset).Documents(ctx)
+	default:
+		iter = r.col.Documents(ctx)
+	}
+
 	for {
 		doc, err := iter.Next()
 		if err == iterator.Done {

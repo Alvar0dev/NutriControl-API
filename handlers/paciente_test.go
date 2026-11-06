@@ -719,3 +719,60 @@ func TestSearchPacientesCombinadoFiltros(t *testing.T) {
 	assert.Len(t, pacientes, 1)
 	assert.Equal(t, "Maria Gomez", pacientes[0].Nombre)
 }
+
+// TestGetPacientesPaginacionLimitOffset verifica paginación nativa del repo vía GetPacientes.
+func TestGetPacientesPaginacionLimitOffset(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	// store inicial: Juan, Maria
+	for i := 0; i < 3; i++ {
+		_, _ = repo.Create(context.Background(), models.Paciente{
+			Nombre: fmt.Sprintf("Extra %d", i),
+			Edad:   20 + i,
+			Peso:   60.0 + float64(i),
+		})
+	}
+	// total 5: Juan, Maria, Extra 0, Extra 1, Extra 2
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes?limit=2&offset=1", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := GetPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 2)
+	assert.Equal(t, "Maria Gomez", pacientes[0].Nombre)
+	assert.Equal(t, "Extra 0", pacientes[1].Nombre)
+}
+
+// TestGetPacientesOffsetSuperaTotal verifica que offset mayor al total devuelve vacío.
+func TestGetPacientesOffsetSuperaTotal(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes?limit=5&offset=100", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := GetPacientes(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 0)
+}
