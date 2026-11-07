@@ -15,8 +15,8 @@ NutriControl API proporciona endpoints para gestión de pacientes (Go + Echo v4)
 - **Filtro nombre**: `GET /pacientes?nombre=` filtra por coincidencia parcial, sin distinción de mayúsculas/minúsculas.
 - **Search**: `GET /pacientes/search` con filtros `nombre` (parcial, case-insensitive), `edad_min`/`edad_max`, `peso_min`/`peso_max`, y paginación `limit` (default 10) / `offset` (default 0). Filtro en memoria sobre `repo.GetAll`.
 - **Stats**: `GET /pacientes/stats` devuelve resumen de solo lectura: `total`, `edad_promedio`, `peso_promedio`, `porcentaje_grasa_promedio`, `edades[]`, `pesos[]`.
-- **PUT validado**: `PUT /pacientes/{id}` actualiza paciente existente con validación (`nombre` requerido, `edad` y `peso` > 0 → 400; ID inexistente → 404). Tests: `TestUpdatePacienteOK`, `TestUpdatePacienteNoEncontrado`, `TestUpdatePacienteEdadInvalida`, `TestUpdatePacientePesoInvalido`.
-- **PATCH parcial**: `PATCH /pacientes/{id}` actualiza solo los campos enviados (nombre, edad, peso, porcentaje_grasa, notas). Valida edad/peso > 0 solo si se envían (400); ID inexistente → 404. Tests: `TestPatchPacienteOK`, `TestPatchPacienteSoloPeso`, `TestPatchPacienteNoEncontrado`, `TestPatchPacienteEdadInvalida`.
+- **PUT validado**: `PUT /pacientes/{id}` actualiza paciente existente con validación (`nombre` requerido, `edad` entre 1 y 120, `peso` > 0 y <= 500 → 400; ID inexistente → 404). El nombre se normaliza (trim + capitalización) antes de guardar. Tests: `TestUpdatePacienteOK`, `TestUpdatePacienteNoEncontrado`, `TestUpdatePacienteEdadInvalida`, `TestUpdatePacientePesoInvalido`, `TestCreatePacienteEdadFueraDeRango`, `TestCreatePacientePesoFueraDeRango`, `TestCreatePacienteNombreConEspaciosSeNormaliza`, `TestCreatePacienteNombreSoloEspacios`.
+- **PATCH parcial**: `PATCH /pacientes/{id}` actualiza solo los campos enviados (nombre, edad, peso, porcentaje_grasa, notas). Valida edad/peso > 0 solo si se envían (400); ID inexistente → 404. El nombre se normaliza cuando se envía. Tests: `TestPatchPacienteOK`, `TestPatchPacienteSoloPeso`, `TestPatchPacienteNoEncontrado`, `TestPatchPacienteEdadInvalida`.
 
 ## Key Commands
 ```bash

@@ -65,7 +65,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | GET | `/pacientes` | GetPacientes | GetAll | 200 OK `[Paciente]` |
 | POST | `/pacientes` | CreatePaciente | Create | 201 Created `Paciente` (el mock asigna `ID` si viene vacío) |
 | GET | `/pacientes/{id}` | GetPacienteByID | GetByID | 200 OK `Paciente` / 404 |
-| PUT | `/pacientes/{id}` | UpdatePaciente | Update | 200 OK `Paciente` / 404 |
+| PUT | `/pacientes/{id}` | UpdatePaciente | Update | 200 OK `Paciente` / 404 / 400 |
 | PATCH | `/pacientes/{id}` | PatchPaciente | GetByID + Update | 200 OK `Paciente` / 404 / 400 |
 | DELETE | `/pacientes/{id}` | DeletePaciente | Delete | 204 No Content / 404 |
 | GET | `/pacientes/search` | SearchPacientes | GetAll + filtro en memoria | 200 OK `[Paciente]` paginado |
@@ -73,7 +73,8 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | GET | `/` | (inline echo) | — | 200 "API NutriControl Operativa" |
 
 - `{id}` proviene de `c.Param("id")`.
-- Validaciones: `nombre` requerido; `edad` y `peso` deben ser > 0 (commit `8a1a47f`). 400 con `{"error": "..."}` si falta o es inválido.
+- Validaciones: `nombre` requerido; `edad` entre 1 y 120; `peso` mayor que 0 y menor o igual a 500 (commit `8a1a47f`). 400 con `{"error": "..."}` si falta o es inválido.
+- El nombre se normaliza antes de guardar: se eliminan espacios sobrantes y se capitaliza la primera letra de cada palabra (`"  juan perez  "` → `"Juan Perez"`). El nombre compuesto solo por espacios se rechaza con 400.
 
 ## 4. Contratos clave
 

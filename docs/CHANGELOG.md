@@ -1,5 +1,28 @@
 # CHANGELOG.md
 
+## Versión 1.0.5 - 2026-11-07
+
+### Validaciones de negocio extra y normalización de nombres
+
+- `validarPaciente` en `handlers/paciente.go`: `edad` debe estar entre 1 y 120 (antes solo > 0); `peso` debe ser mayor que 0 y menor o igual a 500 (antes solo > 0). Los mensajes de error incluyen el rango permitido.
+- Función `normalizarNombre`: elimina espacios sobrantes (`strings.TrimSpace`) y deja cada palabra con primera letra mayúscula y el resto minúscula (`strings.ToUpper`/`strings.ToLower` + `strings.Join`).
+- `CreatePaciente` y `UpdatePaciente`: normalizan el nombre antes de validar y guardar. `PatchPaciente`: normaliza el nombre cuando se envía en el body.
+- Nombre compuesto solo por espacios → 400 (`"El campo 'nombre' es requerido"`).
+- Edad fuera de rango (ej. 150) → 400 con mensaje que menciona `edad`. Peso fuera de rango (ej. 600) → 400 con mensaje que menciona `peso`.
+- Tests agregados en `handlers/paciente_test.go`: `TestCreatePacienteEdadFueraDeRango`, `TestCreatePacientePesoFueraDeRango`, `TestCreatePacienteNombreConEspaciosSeNormaliza`, `TestCreatePacienteNombreSoloEspacios`.
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes.
+- Commit: `f21a6a8 feat: validaciones de negocio extra y normalizar nombres en pacientes`.
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Rangos de edad y peso elegidos de forma deliberada.** La validación original solo rechazaba `<= 0`, lo que permitía valores absurdos (edad 999, peso 10000). Se eligió edad 1-120 y peso 0-500 como límites clínicos razonables para un sistema de nutrición, sin ser restrictivos para casos edge reales. El límite de peso usa `%d` (int) en el mensaje porque la constante `pesoMaximo` se declara como `int`, no `float64`.
+
+2. **Normalización solo en crear y actualizar completa, no en PATCH parcial de otros campos.** El nombre se normaliza en `CreatePaciente`, `UpdatePaciente` y `PatchPaciente` (cuando se envía). No se normalizan otros campos (edad, peso) porque son numéricos y no requieren limpieza de texto.
+
+3. **`fmt.Errorf` vs `fmt.Sprintf` en PATCH.** En `validarPaciente` se usa `fmt.Errorf` (retorna `error`); en `PatchPaciente` se usa `fmt.Sprintf` dentro de `c.JSON` porque el valor se interpola directamente en un `map[string]string`, no se retorna como `error`.
+
+4. **El tipo de `pesoMaximo` causó un error de compilación.** Inicialmente se usó `%.0f` con `pesoMaximo` (`int`), lo que falló en `go vet`. Se corrigió a `%d` para coincidir con el tipo `int`.
+
 ## Versión 1.0.4 - 2026-11-02
 
 ### PATCH `PATCH /pacientes/{id}` (actualización parcial)

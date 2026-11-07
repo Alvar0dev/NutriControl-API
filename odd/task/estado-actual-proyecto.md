@@ -30,6 +30,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T9 | S1 | inline | done | `f06b5aa` feat: endpoint GET /pacientes/stats con resumen de solo lectura (C.5) |
 | T10 | S1 | inline | done | `85ed67f` feat: completar C.6 PUT /pacientes/{id} con tests de éxito y no encontrado |
 | T11 | S1 | inline | done | `9c6f605` feat: agregar PATCH /pacientes/{id} actualización parcial + archivar tracking C.4 |
+| T12 | S1 | inline | done | `f21a6a8` feat: validaciones de negocio extra (edad 1-120, peso 0-500) y normalizar nombres en crear/actualizar |
 
 ## Log
 
@@ -56,3 +57,11 @@ L9: [asistente] Completado C.6: `PUT /pacientes/{id}` (actualizar paciente con v
 
 L10: [usuario] "haz A y B Luego actualiza la documentacion, comitéalo y pusalo."
 L10: [asistente] A: movido `odd/tasks/feature-c4-search.md` a `odd/tasks/archive/`. B: implementado `PATCH /pacientes/{id}` (actualización parcial, solo campos enviados) test-first con 4 tests (`TestPatchPacienteOK`, `TestPatchPacienteSoloPeso`, `TestPatchPacienteNoEncontrado`, `TestPatchPacienteEdadInvalida`). `go test ./...`, `go build ./...`, `go vet ./...` verdes. Documentación actualizada: `PROJECT_INDEX.md` (tabla de rutas + sección 6.7), `AGENTS.md` (Current Architecture), `odd/task/estado-actual-proyecto.md` (T11 + L10). Commit `9c6f605 feat: agregar PATCH /pacientes/{id} actualización parcial y archivar tracking C.4` + pusheado a `origin/main`. Rama limpia, working tree limpio.
+
+L11: [usuario] "haz 1" (opción C: validaciones de negocio extra: rangos edad/peso, normalizar nombres)
+L11: [asistente] Implementado en `handlers/paciente.go` + tests en `handlers/paciente_test.go`. Commit `f21a6a8 feat: validaciones de negocio extra y normalizar nombres en pacientes`.
+- `validarPaciente`: edad 1-120, peso >0 y <=500; mensajes incluyen el rango.
+- `normalizarNombre`: trim + title case, usado en CreatePaciente, UpdatePaciente y PatchPaciente (cuando se envía).
+- Nombre solo espacios → 400.
+- Tests agregados: `TestCreatePacienteEdadFueraDeRango`, `TestCreatePacientePesoFueraDeRango`, `TestCreatePacienteNombreConEspaciosSeNormaliza`, `TestCreatePacienteNombreSoloEspacios`.
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes. Commit en `main`, pendiente de push a `origin/main`.
