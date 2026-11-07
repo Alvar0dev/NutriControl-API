@@ -776,3 +776,95 @@ func TestGetPacientesOffsetSuperaTotal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, pacientes, 0)
 }
+
+// TestCreatePacienteEdadFueraDeRango: edad mayor a 120 -> 400.
+func TestCreatePacienteEdadFueraDeRango(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"nombre":"Ana Lopez","edad":150,"peso":68.5,"porcentaje_grasa":24.0,"notas":"Nueva consulta"}`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := CreatePaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "edad")
+}
+
+// TestCreatePacientePesoFueraDeRango: peso mayor a 500 -> 400.
+func TestCreatePacientePesoFueraDeRango(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"nombre":"Ana Lopez","edad":28,"peso":600,"porcentaje_grasa":24.0,"notas":"Nueva consulta"}`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := CreatePaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "peso")
+}
+
+// TestCreatePacienteNombreConEspaciosSeNormaliza: "  juan perez  " se guarda como "Juan Perez".
+func TestCreatePacienteNombreConEspaciosSeNormaliza(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"nombre":"  juan perez  ","edad":28,"peso":68.5,"porcentaje_grasa":24.0,"notas":"Nueva consulta"}`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := CreatePaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, c.Response().Status)
+
+	var creado models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &creado)
+	require.NoError(t, err)
+	assert.Equal(t, "Juan Perez", creado.Nombre)
+}
+
+// TestCreatePacienteNombreSoloEspacios: nombre solo espacios -> 400.
+func TestCreatePacienteNombreSoloEspacios(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"nombre":"   ","edad":28,"peso":68.5,"porcentaje_grasa":24.0,"notas":"Nueva consulta"}`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	// Act
+	err := CreatePaciente(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "nombre")
+}

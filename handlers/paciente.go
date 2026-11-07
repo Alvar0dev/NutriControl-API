@@ -169,26 +169,48 @@ func StatsPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 	})
 }
 
-// validarPaciente verifica las reglas de negocio mínimas: nombre, edad y peso > 0.
+const (
+	edadMinima   = 1
+	edadMaxima   = 120
+	pesoMaximo   = 500
+)
+
+// normalizarNombre limpia espacios sobrantes y deja cada palabra con primera letra mayúscula.
+func normalizarNombre(nombre string) string {
+	nombre = strings.TrimSpace(nombre)
+	if nombre == "" {
+		return ""
+	}
+	palabras := strings.Fields(nombre)
+	for i, p := range palabras {
+		palabras[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:])
+	}
+	return strings.Join(palabras, " ")
+}
+
+// validarPaciente verifica las reglas de negocio: nombre requerido, edad entre 1 y 120,
+// y peso mayor que 0 y menor o igual a 500.
 func validarPaciente(p models.Paciente) error {
 	if p.Nombre == "" {
 		return fmt.Errorf("El campo 'nombre' es requerido")
 	}
-	if p.Edad <= 0 {
-		return fmt.Errorf("El campo 'edad' debe ser mayor que 0")
+	if p.Edad < edadMinima || p.Edad > edadMaxima {
+		return fmt.Errorf("El campo 'edad' debe estar entre %d y %d", edadMinima, edadMaxima)
 	}
-	if p.Peso <= 0 {
-		return fmt.Errorf("El campo 'peso' debe ser mayor que 0")
+	if p.Peso <= 0 || p.Peso > pesoMaximo {
+		return fmt.Errorf("El campo 'peso' debe ser mayor que 0 y menor o igual a %d", pesoMaximo)
 	}
 	return nil
 }
 
 // CreatePaciente crea un nuevo paciente mediante el repositorio.
+// El nombre se normaliza (trim y capitalización) antes de validar y guardar.
 func CreatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	paciente := new(models.Paciente)
 	if err := c.Bind(paciente); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
+	paciente.Nombre = normalizarNombre(paciente.Nombre)
 	if err := validarPaciente(*paciente); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -200,6 +222,7 @@ func CreatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 }
 
 // UpdatePaciente actualiza un paciente existente por ID.
+// El nombre se normaliza (trim y capitalización) antes de validar y guardar.
 func UpdatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	id := c.Param("id")
 	if id == "" {
@@ -209,6 +232,7 @@ func UpdatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	if err := c.Bind(p); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
+	p.Nombre = normalizarNombre(p.Nombre)
 	if err := validarPaciente(*p); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -247,20 +271,20 @@ func PatchPaciente(c echo.Context, repo firestore.PacienteRepository) error {
 
 	// Aplicar solo los campos que vinieron en el body
 	if nombre, ok := cambios["nombre"]; ok {
-		existente.Nombre = nombre.(string)
+		existente.Nombre = normalizarNombre(nombre.(string))
 	}
 	if edad, ok := cambios["edad"]; ok {
 		if e, ok := edad.(float64); ok {
-			if e <= 0 {
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'edad' debe ser mayor que 0"})
+			if int(e) < edadMinima || int(e) > edadMaxima {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'edad' debe estar entre %d y %d", edadMinima, edadMaxima)})
 			}
 			existente.Edad = int(e)
 		}
 	}
 	if peso, ok := cambios["peso"]; ok {
 		if p, ok := peso.(float64); ok {
-			if p <= 0 {
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'peso' debe ser mayor que 0"})
+			if p <= 0 || p > pesoMaximo {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'peso' debe ser mayor que 0 y menor o igual a %d", pesoMaximo)})
 			}
 			existente.Peso = p
 		}
