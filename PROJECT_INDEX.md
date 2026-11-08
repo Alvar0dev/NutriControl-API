@@ -70,6 +70,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | DELETE | `/pacientes/{id}` | DeletePaciente | Delete | 204 No Content / 404 |
 | GET | `/pacientes/search` | SearchPacientes | GetAll + filtro en memoria | 200 OK `[Paciente]` paginado |
 | GET | `/pacientes/stats` | StatsPacientes | GetAll + agregación en memoria | 200 OK `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` |
+| GET | `/pacientes/edad/{edad}` | GetPacientesPorEdad | GetAll + filtro en memoria por edad exacta | 200 OK `[Paciente]` (vacío si no hay coincidencia) / 400 si edad no numérica |
 | GET | `/` | (inline echo) | — | 200 "API NutriControl Operativa" |
 
 - `{id}` proviene de `c.Param("id")`.

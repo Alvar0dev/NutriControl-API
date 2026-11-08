@@ -1,6 +1,26 @@
 # CHANGELOG.md
 
-## Versión 1.0.5 - 2026-11-07
+## Versión 1.0.6 - 2026-11-08
+
+### Nuevo endpoint `GET /pacientes/edad/{edad}` (filtro por edad exacta)
+
+- Handler `GetPacientesPorEdad` en `handlers/paciente.go`: lee `c.Param("edad")`, convierte a entero, consulta `repo.GetAll` y devuelve solo los pacientes cuya edad coincida exactamente. Responde `200 OK` con lista (vacía si no hay coincidencia).
+- Ruta `GET /pacientes/edad/{edad}` registrada en `SetupRoutes`, antes de `/pacientes/{id}` para evitar ambigüedad con el parámetro de ruta.
+- Validación: `edad` requerido; si no es un número entero válido → `400 Bad Request` con mensaje `"El campo 'edad' debe ser un número entero"`.
+- Tests agregados en `handlers/paciente_test.go`: `TestGetPacientesPorEdadOK` (edad 30 → Juan Perez) y `TestGetPacientesPorEdadVacio` (edad 99 → lista vacía).
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes.
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **`c.Param("edad")` vacío al invocar el handler directamente desde el test.** Como ocurre con todos los handlers que usan parámetros de ruta (`GetPacienteByID`, `UpdatePaciente`, `DeletePaciente`), Echo v4 almacena `pnames`/`pvalues` en campos no exportados del contexto y solo los llena al pasar por el router. Se reutilizó el helper `setParam` (reflect + unsafe.Pointer) para inyectar `edad` en el contexto de test, manteniendo consistencia con el patrón existente del proyecto.
+
+2. **Orden de rutas en `SetupRoutes`.** Se registró `/pacientes/edad/{edad}` antes que `/pacientes/{id}` para que el segmento estático `edad` tenga prioridad sobre el parámetro `{id}` y el router no intente interpretar `edad` como un ID de paciente.
+
+3. **Límite de paginación `limit=0, offset=0` para devolver todos.** `GetPacientesPorEdad` llama a `repo.GetAll(ctx, 0, 0)` para obtener todos los pacientes y filtrar en memoria, igual que `SearchPacientes` y `StatsPacientes`. El mock acepta `limit=0` (sin límite) y `offset=0`.
+
+4. **Tipo `int` para la edad en el filtro.** La edad del modelo `Paciente` es `int`, por lo que `strconv.Atoi` es suficiente sin `ParseFloat`, manteniendo coherencia con el dominio.
+
+---\n## Versión 1.0.5 - 2026-11-07
 
 ### Validaciones de negocio extra y normalización de nombres
 

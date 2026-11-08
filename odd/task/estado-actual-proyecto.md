@@ -31,6 +31,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T10 | S1 | inline | done | `85ed67f` feat: completar C.6 PUT /pacientes/{id} con tests de éxito y no encontrado |
 | T11 | S1 | inline | done | `9c6f605` feat: agregar PATCH /pacientes/{id} actualización parcial + archivar tracking C.4 |
 | T12 | S1 | inline | done | `f21a6a8` feat: validaciones de negocio extra (edad 1-120, peso 0-500) y normalizar nombres en crear/actualizar |
+| T13 | S1 | inline | done | `GET /pacientes/edad/{edad}` filtro por edad exacta (handler + ruta + 2 tests) |
 
 ## Log
 
@@ -60,6 +61,9 @@ L10: [asistente] A: movido `odd/tasks/feature-c4-search.md` a `odd/tasks/archive
 
 L11: [usuario] "haz 1" (opción C: validaciones de negocio extra: rangos edad/peso, normalizar nombres)
 L11: [asistente] Implementado en `handlers/paciente.go` + tests en `handlers/paciente_test.go`. Commit `f21a6a8 feat: validaciones de negocio extra y normalizar nombres en pacientes`.
+
+L12: [usuario] Implementar Opción C: nuevo endpoint `GET /pacientes/edad/{edad}` (filtro por edad exacta), documentar proceso, commitear y pushear.
+L12: [asistente] Implementado `GET /pacientes/edad/{edad}` en `handlers/paciente.go` + 2 tests en `handlers/paciente_test.go` (OK y vacío). Documentación actualizada: `docs/CHANGELOG.md` (v1.0.6), `AGENTS.md` (Current Architecture), `PROJECT_INDEX.md` (tabla de rutas), `odd/task/estado-actual-proyecto.md` (T13 + L12). `go test ./...`, `go vet ./...`, `go build ./...` verdes.
 - `validarPaciente`: edad 1-120, peso >0 y <=500; mensajes incluyen el rango.
 - `normalizarNombre`: trim + title case, usado en CreatePaciente, UpdatePaciente y PatchPaciente (cuando se envía).
 - Nombre solo espacios → 400.

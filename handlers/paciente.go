@@ -306,6 +306,29 @@ func PatchPaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	return c.JSON(http.StatusOK, pacienteActualizado)
 }
 
+// GetPacientesPorEdad obtiene pacientes cuya edad coincida exactamente con la dada en la ruta.
+func GetPacientesPorEdad(c echo.Context, repo firestore.PacienteRepository) error {
+	edadStr := c.Param("edad")
+	if edadStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'edad' es requerido"})
+	}
+	edad, err := strconv.Atoi(edadStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'edad' debe ser un número entero"})
+	}
+	pacientes, err := repo.GetAll(c.Request().Context(), 0, 0)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
+	}
+	filtrados := make([]models.Paciente, 0)
+	for _, p := range pacientes {
+		if p.Edad == edad {
+			filtrados = append(filtrados, p)
+		}
+	}
+	return c.JSON(http.StatusOK, filtrados)
+}
+
 // GetPacienteByID obtiene un paciente por su ID.
 func GetPacienteByID(c echo.Context, repo firestore.PacienteRepository) error {
 	id := c.Param("id")
@@ -356,5 +379,8 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.GET("/pacientes/stats", func(c echo.Context) error {
 		return StatsPacientes(c, repo)
+	})
+	e.GET("/pacientes/edad/{edad}", func(c echo.Context) error {
+		return GetPacientesPorEdad(c, repo)
 	})
 }

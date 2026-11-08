@@ -435,6 +435,54 @@ func TestGetPacientesFiltrarPorNombre(t *testing.T) {
 	assert.Equal(t, "Juan Perez", pacientes[0].Nombre)
 }
 
+// TestGetPacientesPorEdadOK filtra por edad exacta y devuelve los pacientes que coinciden.
+func TestGetPacientesPorEdadOK(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/edad/30", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "edad", "30")
+
+	// Act
+	err := GetPacientesPorEdad(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 1)
+	assert.Equal(t, "Juan Perez", pacientes[0].Nombre)
+	assert.Equal(t, 30, pacientes[0].Edad)
+}
+
+// TestGetPacientesPorEdadVacio devuelve lista vacía cuando no hay coincidencia de edad.
+func TestGetPacientesPorEdadVacio(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/edad/99", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "edad", "99")
+
+	// Act
+	err := GetPacientesPorEdad(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var pacientes []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+	require.NoError(t, err)
+	assert.Len(t, pacientes, 0)
+}
+
 func TestGetPacienteByIDNoEncontrado(t *testing.T) {
 	// Arrange
 	e := newTestEcho()
