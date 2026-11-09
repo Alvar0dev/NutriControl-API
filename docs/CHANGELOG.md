@@ -4,8 +4,8 @@
 
 ### Validación de `porcentaje_grasa` (0–100), `nombre` en PATCH y cobertura de tests en `DeletePaciente` y `GetPacientesPorEdad`
 
-- `validarPaciente` en `handlers/paciente.go`: agrega validación de `porcentaje_grasa` entre `0` y `100` (antes no se acotaba).
-- `PatchPaciente` en `handlers/paciente.go`: valida que `porcentaje_grasa` esté entre `0` y `100` cuando se envía y rechaza con `400 Bad Request` un `nombre` vacío o compuesto solo por espacios tras `normalizarNombre`.
+- `validarPaciente` en `handlers/paciente.go`: agrega validación de `porcentaje_grasa` entre `0` y `100` (`porcentajeGrasaMaximo = 100`).
+- `PatchPaciente` en `handlers/paciente.go`: valida que `porcentaje_grasa` esté entre `0` y `100` cuando se envía, usa aserción de tipo segura `nombre.(string)` y rechaza con `400 Bad Request` un `nombre` vacío o compuesto solo por espacios tras `normalizarNombre`.
 - Tests agregados en `handlers/paciente_test.go`:
   - `TestCreatePacientePorcentajeGrasaFueraDeRango` (table-driven: negativo y > 100 → `400`).
   - `TestUpdatePacientePorcentajeGrasaFueraDeRango` (> 100 en `PUT` → `400`).
@@ -14,6 +14,17 @@
   - `TestGetPacientesPorEdadInvalida` (`edad` no numérica → `400 Bad Request`).
 - Saneamiento documental: restaurado `PROJECT_INDEX.md` completo, cerrado y archivado `odd/tasks/archive/feature-b-paginacion-firestore.md` y sincronizado `odd/task/estado-actual-proyecto.md` y `todo`.
 - `go test ./...`, `go vet ./...`, `go build ./...` todos verdes.
+- Commits: `a0ad130` (saneamiento documental) y `0fd27a6` (validaciones y tests v1.0.7).
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Pérdida accidental de secciones en `PROJECT_INDEX.md` en el working tree previo.** Al iniciar la sesión, `PROJECT_INDEX.md` tenía 269 líneas menos porque una edición inconclusa había sobrescrito las secciones `1` a `6.7` dejando solo un bloque `6.8` con tokens corruptos en otros idiomas (`keine`, `测试端点`, `接收`). Se recuperó la base desde `git show HEAD:PROJECT_INDEX.md`, se actualizó la firma del puerto `GetAll(ctx, limit, offset int)` y se separó la restauración documental en un commit propio (`a0ad130`) antes de tocar código funcional (`0fd27a6`) para mantener unidades de trabajo limpias y revisables.
+
+2. **Asimetría de invariantes entre `POST`/`PUT` y `PATCH`.** `CreatePaciente` y `UpdatePaciente` pasaban por `normalizarNombre` y luego por `validarPaciente`, rechazando `"   "` como nombre vacío. En cambio, `PatchPaciente` aplicaba `normalizarNombre` sobre el mapa JSON sin verificar si el string resultante quedaba vacío, permitiendo dejar un paciente sin nombre mediante una actualización parcial. Además, `porcentaje_grasa` no tenía cota `[0, 100]`. Se unificó el invariante con la constante `porcentajeGrasaMaximo = 100` en ambos flujos y el chequeo `if existente.Nombre == ""` dentro de `PatchPaciente`, preservando la semántica parcial de `PATCH` (solo se validan los campos efectivamente enviados).
+
+3. **Desajuste de estructura JSON durante la fase RED de los tests.** Al correr los tests nuevos en fase RED (antes de implementar la validación), los handlers devolvían `201 Created` o `200 OK` con el struct `Paciente` (donde `edad` es `int`), lo que hacía fallar el `json.Unmarshal` hacia `map[string]string` en el test. Esto confirmó que el test estaba probando la frontera real HTTP; una vez agregada la validación en fase GREEN, el handler responde `400 Bad Request` con `map[string]string{"error": "..."}` y tanto el código de estado como el mensaje pasan de forma consistente.
+
+4. **Verificación de estado real en `TestDeletePacienteOK`.** Para no limitarse a comprobar el código HTTP `204 No Content`, el test consulta inmediatamente `repo.GetByID(ctx, creado.ID)` y verifica que devuelva error, garantizando que el borrado tuvo efecto real en el almacenamiento en memoria.
 
 ---
 ## Versión 1.0.6 - 2026-11-08

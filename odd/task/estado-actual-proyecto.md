@@ -34,7 +34,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T13 | S1 | inline | done | `f21a6a8` feat: validaciones de negocio extra (edad 1-120, peso 0-500) y normalizar nombres en crear/actualizar |
 | T14 | S1 | inline | done | `ae00eea` feat: endpoint GET /pacientes/edad/{edad} filtro por edad exacta (handler + ruta + 2 tests) |
 | T15 | S1 | inline | done | `a0ad130` docs: restaurar PROJECT_INDEX, archivar feature B y sincronizar estado ODD |
-| T16 | S1 | inline | done | Validación de `porcentaje_grasa` (0-100), `nombre` en PATCH y tests de DeletePaciente / GetPacientesPorEdad 400 |
+| T16 | S1 | inline | done | `0fd27a6` feat: validar porcentaje_grasa y nombre en PATCH y cubrir Delete y Edad en tests |
 
 ## Log
 
@@ -71,4 +71,10 @@ L12: [asistente] Implementado `GET /pacientes/edad/{edad}` en `handlers/paciente
 - `normalizarNombre`: trim + title case, usado en CreatePaciente, UpdatePaciente y PatchPaciente (cuando se envía).
 - Nombre solo espacios → 400.
 - Tests agregados: `TestCreatePacienteEdadFueraDeRango`, `TestCreatePacientePesoFueraDeRango`, `TestCreatePacienteNombreConEspaciosSeNormaliza`, `TestCreatePacienteNombreSoloEspacios`.
-- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes. Commit en `main`, pendiente de push a `origin/main`.
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes. Commit en `main`, pusheado a `origin/main`.
+
+L13: [usuario] "Perfecto adelante con el 1 y el 2" / "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L13: [asistente] Ejecutados los puntos 1 y 2 en dos unidades de trabajo y documentado el proceso completo:
+- Unidad 1 (`a0ad130`): restaurado `PROJECT_INDEX.md` completo desde `HEAD` (se habían perdido las secciones 1–6.7 por un reemplazo accidental previo con texto corrupto), cerrado y archivado `odd/tasks/archive/feature-b-paginacion-firestore.md` (`d4f5c15`) y sincronizados `odd/task/estado-actual-proyecto.md` y `todo`.
+- Unidad 2 (`0fd27a6`, v1.0.7): agregada validación de `porcentaje_grasa` en `[0, 100]` (`porcentajeGrasaMaximo = 100`) tanto en `validarPaciente` (`POST`/`PUT`) como en `PatchPaciente`, más rechazo de `nombre` vacío/solo espacios en `PATCH` post-normalización. Agregados tests table-driven (`TestCreatePacientePorcentajeGrasaFueraDeRango`, `TestUpdatePacientePorcentajeGrasaFueraDeRango`, `TestPatchPacienteValidacionesExtra`) y tests faltantes de `DeletePaciente` (`TestDeletePacienteOK`, `TestDeletePacienteNoEncontrado`) y `GetPacientesPorEdad` (`TestGetPacientesPorEdadInvalida`).
+- Documentadas todas las dificultades encontradas y decisiones de diseño en `docs/CHANGELOG.md` (v1.0.7) y `PROJECT_INDEX.md` (secciones 6.9 y 6.10). `go test ./...`, `go vet ./...`, `go build ./...` todos verdes y pusheados a `origin/main`.

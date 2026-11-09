@@ -212,17 +212,26 @@ go vet ./...                     # Verificación estándar
 ### 6.8 Endpoint `GET /pacientes/edad/{edad}` (filtro por edad exacta, v1.0.6)
 
 - `GetPacientesPorEdad` filtra sobre `repo.GetAll(ctx, 0, 0)` y devuelve los pacientes con `Edad == edad` (`200 OK` con lista vacía si no hay coincidencias; `400 Bad Request` si `edad` no es un entero válido).
-- Tests: `TestGetPacientesPorEdadOK`, `TestGetPacientesPorEdadVacio`.
+- Tests: `TestGetPacientesPorEdadOK`, `TestGetPacientesPorEdadVacio`, `TestGetPacientesPorEdadInvalida`.
 - Commit: `ae00eea feat: endpoint GET /pacientes/edad/{edad} filtro por edad exacta`.
 
-### 6.9 Dificultades acumuladas y decisiones de diseño
+### 6.9 Validación de `porcentaje_grasa` (0–100), `nombre` en PATCH y tests de `Delete`/`Edad` (v1.0.7)
+
+- `validarPaciente` y `PatchPaciente` validan `porcentaje_grasa` en el rango `[0, 100]` (`porcentajeGrasaMaximo = 100`).
+- `PatchPaciente` verifica que `nombre`, cuando se envía, no quede vacío tras `normalizarNombre` (rechaza `"   "` con `400 Bad Request`).
+- Cobertura completada con `TestCreatePacientePorcentajeGrasaFueraDeRango`, `TestUpdatePacientePorcentajeGrasaFueraDeRango`, `TestPatchPacienteValidacionesExtra`, `TestDeletePacienteOK`, `TestDeletePacienteNoEncontrado` y `TestGetPacientesPorEdadInvalida`.
+- Commits: `a0ad130` (saneamiento de `PROJECT_INDEX.md` y archivo de Feature B) y `0fd27a6` (validaciones y tests v1.0.7).
+
+### 6.10 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
 3. **`MockPacienteRepository.Create` sin ID**: el mock original no asignaba `ID` cuando venía vacío, impidiendo probar `GetByID`, `Update` o `Delete` sobre pacientes recién creados. Se incorporó el contador atómico `nextID` (`paciente-<n>`).
 4. **Receptor de interfaz por valor vs puntero**: los handlers reciben `firestore.PacienteRepository` por valor (un puntero a interfaz `*firestore.PacienteRepository` no expone los métodos de la interfaz).
-5. **Límites clínicos y formato de tipos**: se acotó `edad` a `1–120` y `peso` a `>0 y <=500`. Las constantes enteras usan `%d` en `fmt.Errorf`/`fmt.Sprintf` para pasar `go vet`.
+5. **Límites clínicos y formato de tipos**: se acotó `edad` a `1–120`, `peso` a `>0 y <=500` y `porcentaje_grasa` a `0–100`. Las constantes enteras usan `%d` en `fmt.Errorf`/`fmt.Sprintf` para pasar `go vet`.
 6. **Prioridad de rutas en Echo v4**: `/pacientes/edad/{edad}` comparte prefijo con `/pacientes/{id}`; Echo prioriza el segmento estático `edad` sobre el parámetro `{id}`.
+7. **Simetría de invariantes en `PATCH` parcial**: como `PATCH` deserializa en `map[string]any` para no pisar campos omitidos, no puede invocar `validarPaciente` antes de fusionar cambios. Por eso aplica `normalizarNombre` y las cotas de rango campo por campo sobre los valores presentes antes de llamar a `repo.Update`.
+8. **Recuperación de `PROJECT_INDEX.md` y separación de commits por unidad de trabajo**: ante un reemplazo accidental que había borrado las secciones `1` a `6.7` del índice en el working tree, se restauró desde `HEAD` en un commit documental independiente (`a0ad130`) antes de aplicar los cambios de código y tests (`0fd27a6`).
 
 ## 7. Convenciones de entrega
 

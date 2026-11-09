@@ -14,5 +14,13 @@
 - [done] Validaciones de negocio extra (edad 1-120, peso 0-500) y normalizar nombres (commit f21a6a8)
 - [done] Endpoint GET /pacientes/edad/{edad} filtro por edad exacta (commit ae00eea)
 - [done] Restaurar PROJECT_INDEX.md y archivar feature-b-paginacion-firestore.md (commit a0ad130)
-- [done] Validar porcentaje_grasa (0-100) y nombre en PATCH + tests faltantes (DeletePaciente, GetPacientesPorEdad 400)
-- [pending] Próxima feature pequeña (ej. GET /health o GET /pacientes/count)
+- [done] Validar porcentaje_grasa (0-100) y nombre en PATCH + tests Delete/Edad 400 (commit 0fd27a6)
+- [done] Documentar dificultades y decisiones de diseño v1.0.7 en CHANGELOG, PROJECT_INDEX y estado ODD
+- [pending] Opción 1 para mañana: Endpoint GET /health (estado del servicio y modo mock/firestore)
+- [pending] Opción 2 para mañana: Endpoint GET /pacientes/imc/{id} (cálculo clínico de IMC o clasificación) o GET /pacientes/count
+- [pending] Opción 3 para mañana: Filtros por porcentaje_grasa_min / porcentaje_grasa_max en GET /pacientes/search
+
+=== Cierre de sesión (2026-11-09) — nota para mañana ===
+
+Estado git: rama main sincronizada con origin/main, working tree limpio, go test/vet/build todos verdes.
+Mañana elegir una de las opciones pendientes (1, 2 o 3) e implementarla test-first (RED -> GREEN -> refactor).
