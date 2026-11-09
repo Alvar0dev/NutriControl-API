@@ -30,8 +30,9 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T9 | S1 | inline | done | `f06b5aa` feat: endpoint GET /pacientes/stats con resumen de solo lectura (C.5) |
 | T10 | S1 | inline | done | `85ed67f` feat: completar C.6 PUT /pacientes/{id} con tests de éxito y no encontrado |
 | T11 | S1 | inline | done | `9c6f605` feat: agregar PATCH /pacientes/{id} actualización parcial + archivar tracking C.4 |
-| T12 | S1 | inline | done | `f21a6a8` feat: validaciones de negocio extra (edad 1-120, peso 0-500) y normalizar nombres en crear/actualizar |
-| T13 | S1 | inline | done | `GET /pacientes/edad/{edad}` filtro por edad exacta (handler + ruta + 2 tests) |
+| T12 | S1 | inline | done | `d4f5c15` feat: paginación nativa GetAll con limit/offset en Firestore y mock |
+| T13 | S1 | inline | done | `f21a6a8` feat: validaciones de negocio extra (edad 1-120, peso 0-500) y normalizar nombres en crear/actualizar |
+| T14 | S1 | inline | done | `ae00eea` feat: endpoint GET /pacientes/edad/{edad} filtro por edad exacta (handler + ruta + 2 tests) |
 
 ## Log
 

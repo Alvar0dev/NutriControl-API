@@ -5,13 +5,13 @@
 - [done] PROJECT_INDEX.md y DEV_RUNBOOK.md actualizados
 - [done] GetPacienteByID con tests (handlers/paciente_test.go)
 - [done] Mock asigna ID al crear (pkg/firestore/mock.go + mock_test.go)
-- [done] Documentación del proceso actualizada (odd/task/estado-actual-proyecto.md + PROJECT_INDEX.md)
-- [done] Merge a main y push (commit 9b26b65)
-- [done] Rama feat/getbyid-tests-y-mock-id borrada (local y remota)
-- [done] Contexto guardado en Engram (id 20)
-- [pending] Opción C: definir e implementar endpoint nuevo
-
-=== Cierre de sesión — nota para mañana ===
-
-Mañana continuá con la opción C: definir cuál endpoint nuevo y implementarlo test-first.
-Estado git: main -> 9b26b65 (publicado a origin/main). Sin cambios pendientes.
+- [done] Filtro por nombre en GET /pacientes?nombre= (commit 9102ca9)
+- [done] Endpoint GET /pacientes/search con filtros y paginación (commit a4675bb)
+- [done] Endpoint GET /pacientes/stats con resumen de solo lectura (commit f06b5aa)
+- [done] Completar PUT /pacientes/{id} con tests 200 y 404 (commit 85ed67f)
+- [done] Endpoint PATCH /pacientes/{id} actualización parcial (commit 9c6f605)
+- [done] Paginación nativa GetAll con limit/offset en Firestore y mock (commit d4f5c15)
+- [done] Validaciones de negocio extra (edad 1-120, peso 0-500) y normalizar nombres (commit f21a6a8)
+- [done] Endpoint GET /pacientes/edad/{edad} filtro por edad exacta (commit ae00eea)
+- [done] Restaurar PROJECT_INDEX.md y archivar feature-b-paginacion-firestore.md
+- [pending] Validar porcentaje_grasa (0-100) y nombre en PATCH + tests faltantes (DeletePaciente, GetPacientesPorEdad 400)
