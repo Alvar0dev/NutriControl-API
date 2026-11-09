@@ -170,9 +170,10 @@ func StatsPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 }
 
 const (
-	edadMinima   = 1
-	edadMaxima   = 120
-	pesoMaximo   = 500
+	edadMinima            = 1
+	edadMaxima            = 120
+	pesoMaximo            = 500
+	porcentajeGrasaMaximo = 100
 )
 
 // normalizarNombre limpia espacios sobrantes y deja cada palabra con primera letra mayúscula.
@@ -189,7 +190,7 @@ func normalizarNombre(nombre string) string {
 }
 
 // validarPaciente verifica las reglas de negocio: nombre requerido, edad entre 1 y 120,
-// y peso mayor que 0 y menor o igual a 500.
+// peso mayor que 0 y menor o igual a 500, y porcentaje_grasa entre 0 y 100.
 func validarPaciente(p models.Paciente) error {
 	if p.Nombre == "" {
 		return fmt.Errorf("El campo 'nombre' es requerido")
@@ -199,6 +200,9 @@ func validarPaciente(p models.Paciente) error {
 	}
 	if p.Peso <= 0 || p.Peso > pesoMaximo {
 		return fmt.Errorf("El campo 'peso' debe ser mayor que 0 y menor o igual a %d", pesoMaximo)
+	}
+	if p.PorcentajeGrasa < 0 || p.PorcentajeGrasa > porcentajeGrasaMaximo {
+		return fmt.Errorf("El campo 'porcentaje_grasa' debe estar entre 0 y %d", porcentajeGrasaMaximo)
 	}
 	return nil
 }
@@ -271,7 +275,12 @@ func PatchPaciente(c echo.Context, repo firestore.PacienteRepository) error {
 
 	// Aplicar solo los campos que vinieron en el body
 	if nombre, ok := cambios["nombre"]; ok {
-		existente.Nombre = normalizarNombre(nombre.(string))
+		if n, ok := nombre.(string); ok {
+			existente.Nombre = normalizarNombre(n)
+			if existente.Nombre == "" {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'nombre' es requerido"})
+			}
+		}
 	}
 	if edad, ok := cambios["edad"]; ok {
 		if e, ok := edad.(float64); ok {
@@ -291,6 +300,9 @@ func PatchPaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	}
 	if grasa, ok := cambios["porcentaje_grasa"]; ok {
 		if g, ok := grasa.(float64); ok {
+			if g < 0 || g > porcentajeGrasaMaximo {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'porcentaje_grasa' debe estar entre 0 y %d", porcentajeGrasaMaximo)})
+			}
 			existente.PorcentajeGrasa = g
 		}
 	}

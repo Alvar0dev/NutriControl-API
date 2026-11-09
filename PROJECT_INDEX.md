@@ -75,8 +75,8 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | GET | `/` | (inline echo) | — | 200 "API NutriControl Operativa" |
 
 - `{id}` proviene de `c.Param("id")`.
-- Validaciones: `nombre` requerido; `edad` entre 1 y 120; `peso` mayor que 0 y menor o igual a 500. 400 con `{"error": "..."}` si falta o es inválido.
-- El nombre se normaliza antes de guardar: se eliminan espacios sobrantes y se capitaliza la primera letra de cada palabra (`"  juan perez  "` → `"Juan Perez"`). El nombre compuesto solo por espacios se rechaza con 400.
+- Validaciones: `nombre` requerido; `edad` entre 1 y 120; `peso` mayor que 0 y menor o igual a 500; `porcentaje_grasa` entre 0 y 100. 400 con `{"error": "..."}` si falta o es inválido.
+- El nombre se normaliza antes de guardar: se eliminan espacios sobrantes y se capitaliza la primera letra de cada palabra (`"  juan perez  "` → `"Juan Perez"`). El nombre compuesto solo por espacios se rechaza con 400 (tanto en `POST`/`PUT` como en `PATCH`).
 
 ## 4. Contratos clave
 

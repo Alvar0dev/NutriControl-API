@@ -1,5 +1,21 @@
 # CHANGELOG.md
 
+## Versión 1.0.7 - 2026-11-09
+
+### Validación de `porcentaje_grasa` (0–100), `nombre` en PATCH y cobertura de tests en `DeletePaciente` y `GetPacientesPorEdad`
+
+- `validarPaciente` en `handlers/paciente.go`: agrega validación de `porcentaje_grasa` entre `0` y `100` (antes no se acotaba).
+- `PatchPaciente` en `handlers/paciente.go`: valida que `porcentaje_grasa` esté entre `0` y `100` cuando se envía y rechaza con `400 Bad Request` un `nombre` vacío o compuesto solo por espacios tras `normalizarNombre`.
+- Tests agregados en `handlers/paciente_test.go`:
+  - `TestCreatePacientePorcentajeGrasaFueraDeRango` (table-driven: negativo y > 100 → `400`).
+  - `TestUpdatePacientePorcentajeGrasaFueraDeRango` (> 100 en `PUT` → `400`).
+  - `TestPatchPacienteValidacionesExtra` (table-driven: `porcentaje_grasa` negativo, > 100 y `nombre` solo espacios en `PATCH` → `400`).
+  - `TestDeletePacienteOK` (`204 No Content` y baja efectiva en el repositorio) y `TestDeletePacienteNoEncontrado` (`404 Not Found`).
+  - `TestGetPacientesPorEdadInvalida` (`edad` no numérica → `400 Bad Request`).
+- Saneamiento documental: restaurado `PROJECT_INDEX.md` completo, cerrado y archivado `odd/tasks/archive/feature-b-paginacion-firestore.md` y sincronizado `odd/task/estado-actual-proyecto.md` y `todo`.
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes.
+
+---
 ## Versión 1.0.6 - 2026-11-08
 
 ### Nuevo endpoint `GET /pacientes/edad/{edad}` (filtro por edad exacta)

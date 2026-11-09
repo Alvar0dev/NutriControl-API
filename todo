@@ -13,5 +13,6 @@
 - [done] Paginación nativa GetAll con limit/offset en Firestore y mock (commit d4f5c15)
 - [done] Validaciones de negocio extra (edad 1-120, peso 0-500) y normalizar nombres (commit f21a6a8)
 - [done] Endpoint GET /pacientes/edad/{edad} filtro por edad exacta (commit ae00eea)
-- [done] Restaurar PROJECT_INDEX.md y archivar feature-b-paginacion-firestore.md
-- [pending] Validar porcentaje_grasa (0-100) y nombre en PATCH + tests faltantes (DeletePaciente, GetPacientesPorEdad 400)
+- [done] Restaurar PROJECT_INDEX.md y archivar feature-b-paginacion-firestore.md (commit a0ad130)
+- [done] Validar porcentaje_grasa (0-100) y nombre en PATCH + tests faltantes (DeletePaciente, GetPacientesPorEdad 400)
+- [pending] Próxima feature pequeña (ej. GET /health o GET /pacientes/count)

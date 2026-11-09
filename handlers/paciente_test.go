@@ -916,3 +916,174 @@ func TestCreatePacienteNombreSoloEspacios(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, resp["error"], "nombre")
 }
+
+// TestCreatePacientePorcentajeGrasaFueraDeRango verifica que porcentaje_grasa fuera de [0, 100] devuelve 400.
+func TestCreatePacientePorcentajeGrasaFueraDeRango(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{
+			name:    "porcentaje de grasa negativo",
+			payload: `{"nombre":"Ana Lopez","edad":28,"peso":68.5,"porcentaje_grasa":-5.0}`,
+		},
+		{
+			name:    "porcentaje de grasa mayor a 100",
+			payload: `{"nombre":"Ana Lopez","edad":28,"peso":68.5,"porcentaje_grasa":105.0}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEcho()
+			repo := firestore.NewMockPacienteRepository()
+			req := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(tt.payload))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			c := e.NewContext(req, httptest.NewRecorder())
+
+			err := CreatePaciente(c, repo)
+
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+			var resp map[string]string
+			err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+			require.NoError(t, err)
+			assert.Contains(t, resp["error"], "porcentaje_grasa")
+		})
+	}
+}
+
+// TestUpdatePacientePorcentajeGrasaFueraDeRango verifica 400 en PUT cuando porcentaje_grasa supera 100.
+func TestUpdatePacientePorcentajeGrasaFueraDeRango(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"nombre":"Ana Lopez","edad":28,"peso":68.5,"porcentaje_grasa":110.0}`
+	req := httptest.NewRequest(http.MethodPut, "/pacientes/1", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", "1")
+
+	err := UpdatePaciente(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "porcentaje_grasa")
+}
+
+// TestPatchPacienteValidacionesExtra verifica validaciones de porcentaje_grasa y nombre vacío en PATCH.
+func TestPatchPacienteValidacionesExtra(t *testing.T) {
+	tests := []struct {
+		name          string
+		payload       string
+		expectedError string
+	}{
+		{
+			name:          "porcentaje de grasa negativo en PATCH",
+			payload:       `{"porcentaje_grasa":-1.0}`,
+			expectedError: "porcentaje_grasa",
+		},
+		{
+			name:          "porcentaje de grasa mayor a 100 en PATCH",
+			payload:       `{"porcentaje_grasa":120.0}`,
+			expectedError: "porcentaje_grasa",
+		},
+		{
+			name:          "nombre compuesto solo por espacios en PATCH",
+			payload:       `{"nombre":"   "}`,
+			expectedError: "nombre",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEcho()
+			repo := firestore.NewMockPacienteRepository()
+			creado, err := repo.Create(context.Background(), models.Paciente{
+				Nombre: "Ana Lopez", Edad: 28, Peso: 68.5, PorcentajeGrasa: 24.0,
+			})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPatch, "/pacientes/"+creado.ID, strings.NewReader(tt.payload))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			c := e.NewContext(req, httptest.NewRecorder())
+			setParam(c, "id", creado.ID)
+
+			err = PatchPaciente(c, repo)
+
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+			var resp map[string]string
+			err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+			require.NoError(t, err)
+			assert.Contains(t, resp["error"], tt.expectedError)
+		})
+	}
+}
+
+// TestDeletePacienteOK verifica eliminación exitosa (204 No Content) y baja efectiva del repositorio.
+func TestDeletePacienteOK(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	creado, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Ana Lopez", Edad: 28, Peso: 68.5,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodDelete, "/pacientes/"+creado.ID, nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", creado.ID)
+
+	err = DeletePaciente(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, c.Response().Status)
+
+	_, err = repo.GetByID(context.Background(), creado.ID)
+	assert.Error(t, err)
+}
+
+// TestDeletePacienteNoEncontrado verifica 404 al intentar eliminar un ID inexistente.
+func TestDeletePacienteNoEncontrado(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+
+	req := httptest.NewRequest(http.MethodDelete, "/pacientes/inexistente", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", "inexistente")
+
+	err := DeletePaciente(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "No se encontró paciente")
+}
+
+// TestGetPacientesPorEdadInvalida verifica 400 cuando el parámetro edad no es numérico.
+func TestGetPacientesPorEdadInvalida(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/edad/abc", nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "edad", "abc")
+
+	err := GetPacientesPorEdad(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "edad")
+}

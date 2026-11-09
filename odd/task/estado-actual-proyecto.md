@@ -33,6 +33,8 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T12 | S1 | inline | done | `d4f5c15` feat: paginación nativa GetAll con limit/offset en Firestore y mock |
 | T13 | S1 | inline | done | `f21a6a8` feat: validaciones de negocio extra (edad 1-120, peso 0-500) y normalizar nombres en crear/actualizar |
 | T14 | S1 | inline | done | `ae00eea` feat: endpoint GET /pacientes/edad/{edad} filtro por edad exacta (handler + ruta + 2 tests) |
+| T15 | S1 | inline | done | `a0ad130` docs: restaurar PROJECT_INDEX, archivar feature B y sincronizar estado ODD |
+| T16 | S1 | inline | done | Validación de `porcentaje_grasa` (0-100), `nombre` en PATCH y tests de DeletePaciente / GetPacientesPorEdad 400 |
 
 ## Log
 
