@@ -16,6 +16,15 @@
 - [done] Restaurar PROJECT_INDEX.md y archivar feature-b-paginacion-firestore.md (commit a0ad130)
 - [done] Validar porcentaje_grasa (0-100) y nombre en PATCH + tests Delete/Edad 400 (commit 0fd27a6)
 - [done] Documentar dificultades y decisiones de diseño v1.0.7 en CHANGELOG, PROJECT_INDEX y estado ODD (commit 5cb9335)
-- [done] Opción 1: Endpoint GET /health (estado del servicio y modo mock/firestore)
-- [done] Opción 2: Endpoint GET /pacientes/count (total de pacientes registrados)
-- [done] Opción 3: Filtros por porcentaje_grasa_min / porcentaje_grasa_max en GET /pacientes/search
+- [done] Opción 1: Endpoint GET /health (estado del servicio y modo mock/firestore) (commit 8d32dd6)
+- [done] Opción 2: Endpoint GET /pacientes/count (total de pacientes registrados) (commit 8d32dd6)
+- [done] Opción 3: Filtros por porcentaje_grasa_min / porcentaje_grasa_max en GET /pacientes/search (commit 8d32dd6)
+- [done] Documentar dificultades y decisiones de diseño v1.0.8 y plan para mañana
+- [pending] Opción 1 para mañana: Ordenamiento en GET /pacientes y GET /pacientes/search (?sort=nombre|edad|peso|porcentaje_grasa&order=asc|desc)
+- [pending] Opción 2 para mañana: Endpoint GET /pacientes/export (exportar listado de pacientes en formato CSV)
+- [pending] Opción 3 para mañana: Endpoint POST /pacientes/batch (alta múltiple validada de pacientes en una sola petición)
+
+=== Cierre de sesión (2026-11-10) — nota para mañana ===
+
+Estado git: rama main sincronizada con origin/main, working tree limpio, go test/vet/build todos verdes.
+Mañana elegir una o varias de las opciones pendientes (1, 2 o 3) e implementarlas test-first (RED -> GREEN -> refactor).

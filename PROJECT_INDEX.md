@@ -149,7 +149,7 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` por ID), filtro por nombre, `search` con paginación nativa `limit`/`offset`, `stats`, `GET /pacientes/edad/{edad}`, validaciones de negocio (edad 1-120, peso 0-500) y normalización de nombres. |
+| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` por ID), `GET /health`, filtro por nombre, `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100) y normalización de nombres. |
 | Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). |
 | Build | `go build ./...` y `go vet ./...` OK. |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
@@ -231,6 +231,7 @@ go vet ./...                     # Verificación estándar
 - `SearchPacientes` (`GET /pacientes/search`): incorpora los filtros opcionales `porcentaje_grasa_min` y `porcentaje_grasa_max` (rango inclusivo en `float64`).
 - En `SetupRoutes` se reordenaron todas las rutas estáticas (`/pacientes/search`, `/pacientes/stats`, `/pacientes/count`, `/pacientes/edad/{edad}`) antes de `/pacientes/{id}`.
 - Tests: `TestHealthCheckOK`, `TestCountPacientesOK`, `TestCountPacientesVacio` y `TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax`.
+- Commit: `8d32dd6 feat: agregar GET /health, GET /pacientes/count y filtro porcentaje_grasa en search`.
 
 ### 6.11 Dificultades acumuladas y decisiones de diseño
 
@@ -239,9 +240,12 @@ go vet ./...                     # Verificación estándar
 3. **`MockPacienteRepository.Create` sin ID**: el mock original no asignaba `ID` cuando venía vacío, impidiendo probar `GetByID`, `Update` o `Delete` sobre pacientes recién creados. Se incorporó el contador atómico `nextID` (`paciente-<n>`).
 4. **Receptor de interfaz por valor vs puntero**: los handlers reciben `firestore.PacienteRepository` por valor (un puntero a interfaz `*firestore.PacienteRepository` no expone los métodos de la interfaz).
 5. **Límites clínicos y formato de tipos**: se acotó `edad` a `1–120`, `peso` a `>0 y <=500` y `porcentaje_grasa` a `0–100`. Las constantes enteras usan `%d` en `fmt.Errorf`/`fmt.Sprintf` para pasar `go vet`.
-6. **Prioridad de rutas en Echo v4**: `/pacientes/edad/{edad}` comparte prefijo con `/pacientes/{id}`; Echo prioriza el segmento estático `edad` sobre el parámetro `{id}`.
+6. **Prioridad de rutas en Echo v4**: `/pacientes/search`, `/pacientes/stats`, `/pacientes/count` y `/pacientes/edad/{edad}` se registran en `SetupRoutes` antes que `/pacientes/{id}` para priorizar los segmentos estáticos frente al parámetro `{id}`.
 7. **Simetría de invariantes en `PATCH` parcial**: como `PATCH` deserializa en `map[string]any` para no pisar campos omitidos, no puede invocar `validarPaciente` antes de fusionar cambios. Por eso aplica `normalizarNombre` y las cotas de rango campo por campo sobre los valores presentes antes de llamar a `repo.Update`.
 8. **Recuperación de `PROJECT_INDEX.md` y separación de commits por unidad de trabajo**: ante un reemplazo accidental que había borrado las secciones `1` a `6.7` del índice en el working tree, se restauró desde `HEAD` en un commit documental independiente (`a0ad130`) antes de aplicar los cambios de código y tests (`0fd27a6`).
+9. **Inspección de adaptador en `HealthCheck` sin acoplar `PacienteRepository`**: `HealthCheck` usa `_, isMock := repo.(*firestore.MockPacienteRepository)` para informar `"storage": "mock"|"firestore"` sin añadir métodos de infraestructura a la interfaz de dominio/puerto.
+10. **Elección de `GET /pacientes/count` acorde al modelo de dominio**: dado que `models.Paciente` no incluye `Altura`, se descartó calcular IMC y se implementó `GET /pacientes/count` sobre `repo.GetAll(ctx, 0, 0)`, respetando la estructura de datos existente.
+11. **Verificación contra el seed real del mock en tests table-driven**: en la primera corrida de `TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax` se detectó que en `NewMockPacienteRepository()` `Juan Perez` tiene `18.5%` de grasa y `Maria Gomez` tiene `22.0%` (al revés de lo supuesto inicialmente), ajustándose las aserciones al estado real del seed.
 
 ## 7. Convenciones de entrega
 
