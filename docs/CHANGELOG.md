@@ -1,5 +1,23 @@
 # CHANGELOG.md
 
+## Versión 1.0.8 - 2026-11-10
+
+### Endpoints `GET /health`, `GET /pacientes/count` y filtros `porcentaje_grasa_min`/`max` en `GET /pacientes/search`
+
+- Handler `HealthCheck` (`GET /health`) en `handlers/paciente.go`: devuelve `200 OK` con `{"status": "ok", "storage": "mock"|"firestore"}` según la implementación activa de `PacienteRepository`.
+- Handler `CountPacientes` (`GET /pacientes/count`) en `handlers/paciente.go`: consulta `repo.GetAll(ctx, 0, 0)` y devuelve `200 OK` con `{"total": <n>}`.
+- `SearchPacientes` (`GET /pacientes/search`): agrega filtros por rango inclusivo `porcentaje_grasa_min` y `porcentaje_grasa_max` (`strconv.ParseFloat`).
+- `SetupRoutes`: agrupa todas las rutas con segmento estático (`/pacientes/search`, `/pacientes/stats`, `/pacientes/count`, `/pacientes/edad/{edad}`) antes de las rutas parametrizadas `/pacientes/{id}`.
+- Tests agregados en `handlers/paciente_test.go`: `TestHealthCheckOK`, `TestCountPacientesOK`, `TestCountPacientesVacio` y `TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax` (table-driven).
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes.
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Elección de `GET /pacientes/count` frente a `GET /pacientes/imc/{id}`.** El modelo de dominio `models.Paciente` no posee campo `Altura`, por lo que calcular el IMC habría exigido alterar la estructura de dominio o recibir parámetros externos en una ruta de lectura. `GET /pacientes/count` respeta la frontera de dominio actual y reutiliza `repo.GetAll(ctx, 0, 0)` sin tocar `pkg/firestore/`.
+2. **Detección del modo de almacenamiento en `HealthCheck` sin modificar la interfaz `PacienteRepository`.** Mediante una aserción de tipo `_, isMock := repo.(*firestore.MockPacienteRepository)` se informa si el servidor corre en modo `"mock"` o `"firestore"` manteniendo intacto el contrato del puerto `PacienteRepository`.
+3. **Datos seed del mock en `TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax`.** En `NewMockPacienteRepository()`, `Juan Perez` tiene `PorcentajeGrasa: 18.5` y `Maria Gomez` tiene `22.0`; al ejecutar la primera corrida de los tests table-driven se detectó que los nombres esperados estaban invertidos respecto del seed real, corrigiéndose inmediatamente contra `pkg/firestore/mock.go`.
+
+---
 ## Versión 1.0.7 - 2026-11-09
 
 ### Validación de `porcentaje_grasa` (0–100), `nombre` en PATCH y cobertura de tests en `DeletePaciente` y `GetPacientesPorEdad`

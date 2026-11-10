@@ -35,6 +35,9 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T14 | S1 | inline | done | `ae00eea` feat: endpoint GET /pacientes/edad/{edad} filtro por edad exacta (handler + ruta + 2 tests) |
 | T15 | S1 | inline | done | `a0ad130` docs: restaurar PROJECT_INDEX, archivar feature B y sincronizar estado ODD |
 | T16 | S1 | inline | done | `0fd27a6` feat: validar porcentaje_grasa y nombre en PATCH y cubrir Delete y Edad en tests |
+| T17 | S1 | inline | done | Endpoint `GET /health` (`HealthCheck` + `TestHealthCheckOK`) |
+| T18 | S1 | inline | done | Endpoint `GET /pacientes/count` (`CountPacientes` + `TestCountPacientesOK`, `TestCountPacientesVacio`) |
+| T19 | S1 | inline | done | Filtros `porcentaje_grasa_min`/`max` en `GET /pacientes/search` (`TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax`) |
 
 ## Log
 
@@ -78,3 +81,10 @@ L13: [asistente] Ejecutados los puntos 1 y 2 en dos unidades de trabajo y docume
 - Unidad 1 (`a0ad130`): restaurado `PROJECT_INDEX.md` completo desde `HEAD` (se habían perdido las secciones 1–6.7 por un reemplazo accidental previo con texto corrupto), cerrado y archivado `odd/tasks/archive/feature-b-paginacion-firestore.md` (`d4f5c15`) y sincronizados `odd/task/estado-actual-proyecto.md` y `todo`.
 - Unidad 2 (`0fd27a6`, v1.0.7): agregada validación de `porcentaje_grasa` en `[0, 100]` (`porcentajeGrasaMaximo = 100`) tanto en `validarPaciente` (`POST`/`PUT`) como en `PatchPaciente`, más rechazo de `nombre` vacío/solo espacios en `PATCH` post-normalización. Agregados tests table-driven (`TestCreatePacientePorcentajeGrasaFueraDeRango`, `TestUpdatePacientePorcentajeGrasaFueraDeRango`, `TestPatchPacienteValidacionesExtra`) y tests faltantes de `DeletePaciente` (`TestDeletePacienteOK`, `TestDeletePacienteNoEncontrado`) y `GetPacientesPorEdad` (`TestGetPacientesPorEdadInvalida`).
 - Documentadas todas las dificultades encontradas y decisiones de diseño en `docs/CHANGELOG.md` (v1.0.7) y `PROJECT_INDEX.md` (secciones 6.9 y 6.10). `go test ./...`, `go vet ./...`, `go build ./...` todos verdes y pusheados a `origin/main`.
+
+L14: [usuario] "continua con los 3"
+L14: [asistente] Implementadas test-first las 3 opciones planteadas (`v1.0.8`):
+- `GET /health` (`HealthCheck`): devuelve `200 OK` con `{"status": "ok", "storage": "mock"|"firestore"}`. Test: `TestHealthCheckOK`.
+- `GET /pacientes/count` (`CountPacientes`): devuelve `200 OK` con `{"total": <n>}` usando `repo.GetAll(ctx, 0, 0)`. Tests: `TestCountPacientesOK` y `TestCountPacientesVacio`.
+- `GET /pacientes/search` (`SearchPacientes`): agregados filtros `porcentaje_grasa_min` y `porcentaje_grasa_max`. Test table-driven: `TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax`.
+- Documentación sincronizada en `AGENTS.md`, `PROJECT_INDEX.md`, `docs/CHANGELOG.md` (v1.0.8), `odd/task/estado-actual-proyecto.md` y `todo`. `go test ./...`, `go vet ./...`, `go build ./...` todos verdes.

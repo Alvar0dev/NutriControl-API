@@ -63,6 +63,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 
 | Método | Ruta | Handler | Repo método | Éxito |
 |--------|------|---------|-------------|-------|
+| GET | `/health` | HealthCheck | — (inspección de adaptador) | 200 OK `{"status": "ok", "storage": "mock"\|"firestore"}` |
 | GET | `/pacientes` | GetPacientes | GetAll(ctx, limit, offset) | 200 OK `[Paciente]` |
 | POST | `/pacientes` | CreatePaciente | Create | 201 Created `Paciente` (el mock asigna `ID` si viene vacío) |
 | GET | `/pacientes/{id}` | GetPacienteByID | GetByID | 200 OK `Paciente` / 404 |
@@ -71,6 +72,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | DELETE | `/pacientes/{id}` | DeletePaciente | Delete | 204 No Content / 404 |
 | GET | `/pacientes/search` | SearchPacientes | GetAll(ctx, limit, offset) + filtro en memoria | 200 OK `[Paciente]` paginado |
 | GET | `/pacientes/stats` | StatsPacientes | GetAll(ctx, limit, offset) + agregación en memoria | 200 OK `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` |
+| GET | `/pacientes/count` | CountPacientes | GetAll(ctx, 0, 0) | 200 OK `{"total": <n>}` |
 | GET | `/pacientes/edad/{edad}` | GetPacientesPorEdad | GetAll(ctx, 0, 0) + filtro en memoria por edad exacta | 200 OK `[Paciente]` (vacío si no hay coincidencia) / 400 si edad no numérica |
 | GET | `/` | (inline echo) | — | 200 "API NutriControl Operativa" |
 
@@ -222,7 +224,15 @@ go vet ./...                     # Verificación estándar
 - Cobertura completada con `TestCreatePacientePorcentajeGrasaFueraDeRango`, `TestUpdatePacientePorcentajeGrasaFueraDeRango`, `TestPatchPacienteValidacionesExtra`, `TestDeletePacienteOK`, `TestDeletePacienteNoEncontrado` y `TestGetPacientesPorEdadInvalida`.
 - Commits: `a0ad130` (saneamiento de `PROJECT_INDEX.md` y archivo de Feature B) y `0fd27a6` (validaciones y tests v1.0.7).
 
-### 6.10 Dificultades acumuladas y decisiones de diseño
+### 6.10 Endpoints `GET /health`, `GET /pacientes/count` y filtros `porcentaje_grasa_min`/`max` en `search` (v1.0.8)
+
+- `HealthCheck` (`GET /health`): devuelve `200 OK` con `{"status": "ok", "storage": "mock"|"firestore"}` inspeccionando el tipo concreto de `PacienteRepository`.
+- `CountPacientes` (`GET /pacientes/count`): devuelve `200 OK` con `{"total": <n>}` sobre `repo.GetAll(ctx, 0, 0)`.
+- `SearchPacientes` (`GET /pacientes/search`): incorpora los filtros opcionales `porcentaje_grasa_min` y `porcentaje_grasa_max` (rango inclusivo en `float64`).
+- En `SetupRoutes` se reordenaron todas las rutas estáticas (`/pacientes/search`, `/pacientes/stats`, `/pacientes/count`, `/pacientes/edad/{edad}`) antes de `/pacientes/{id}`.
+- Tests: `TestHealthCheckOK`, `TestCountPacientesOK`, `TestCountPacientesVacio` y `TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax`.
+
+### 6.11 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.

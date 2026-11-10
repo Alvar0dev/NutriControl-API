@@ -1087,3 +1087,110 @@ func TestGetPacientesPorEdadInvalida(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, resp["error"], "edad")
 }
+
+// TestHealthCheckOK verifica que GET /health devuelve 200 OK con status y modo de almacenamiento.
+func TestHealthCheckOK(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	err := HealthCheck(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var resp map[string]string
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", resp["status"])
+	assert.Equal(t, "mock", resp["storage"])
+}
+
+// TestCountPacientesOK verifica que GET /pacientes/count devuelve el total de pacientes.
+func TestCountPacientesOK(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/count", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	err := CountPacientes(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var resp map[string]int
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, 2, resp["total"])
+}
+
+// TestCountPacientesVacio verifica que GET /pacientes/count devuelve total 0 cuando el repositorio está vacío.
+func TestCountPacientesVacio(t *testing.T) {
+	e := newTestEcho()
+	repo := &firestore.MockPacienteRepository{}
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/count", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	err := CountPacientes(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var resp map[string]int
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, 0, resp["total"])
+}
+
+// TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax verifica el filtro por rango de porcentaje_grasa en GET /pacientes/search.
+func TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax(t *testing.T) {
+	// Seed del mock: Juan Perez (porcentaje_grasa: 18.5), Maria Gomez (porcentaje_grasa: 22.0)
+	tests := []struct {
+		name           string
+		query          string
+		expectedCount  int
+		expectedNombre string
+	}{
+		{
+			name:           "rango entre 20 y 25 devuelve solo Maria Gomez",
+			query:          "/pacientes/search?porcentaje_grasa_min=20&porcentaje_grasa_max=25",
+			expectedCount:  1,
+			expectedNombre: "Maria Gomez",
+		},
+		{
+			name:           "maximo 19 devuelve solo Juan Perez",
+			query:          "/pacientes/search?porcentaje_grasa_max=19",
+			expectedCount:  1,
+			expectedNombre: "Juan Perez",
+		},
+		{
+			name:          "minimo 30 devuelve lista vacia",
+			query:         "/pacientes/search?porcentaje_grasa_min=30",
+			expectedCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEcho()
+			repo := firestore.NewMockPacienteRepository()
+			req := httptest.NewRequest(http.MethodGet, tt.query, nil)
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			c := e.NewContext(req, httptest.NewRecorder())
+
+			err := SearchPacientes(c, repo)
+
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, c.Response().Status)
+
+			var pacientes []models.Paciente
+			err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+			require.NoError(t, err)
+			assert.Len(t, pacientes, tt.expectedCount)
+			if tt.expectedCount == 1 {
+				assert.Equal(t, tt.expectedNombre, pacientes[0].Nombre)
+			}
+		})
+	}
+}

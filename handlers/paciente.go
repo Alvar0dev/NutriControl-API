@@ -59,6 +59,7 @@ func GetPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 //   - nombre: coincidencia parcial, sin distinción de mayúsculas/minúsculas
 //   - edad_min, edad_max: rango inclusivo de edad
 //   - peso_min, peso_max: rango inclusivo de peso
+//   - porcentaje_grasa_min, porcentaje_grasa_max: rango inclusivo de porcentaje de grasa
 //   - limit: máximo resultados (default 10)
 //   - offset: salto de resultados (default 0)
 func SearchPacientes(c echo.Context, repo firestore.PacienteRepository) error {
@@ -121,6 +122,30 @@ func SearchPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 			filtrados := pacientes[:0]
 			for _, p := range pacientes {
 				if p.Peso <= pesoMax {
+					filtrados = append(filtrados, p)
+				}
+			}
+			pacientes = filtrados
+		}
+	}
+
+	// Filtro por rango de porcentaje de grasa
+	if grasaMinStr := c.QueryParam("porcentaje_grasa_min"); grasaMinStr != "" {
+		if grasaMin, err := strconv.ParseFloat(grasaMinStr, 64); err == nil {
+			filtrados := pacientes[:0]
+			for _, p := range pacientes {
+				if p.PorcentajeGrasa >= grasaMin {
+					filtrados = append(filtrados, p)
+				}
+			}
+			pacientes = filtrados
+		}
+	}
+	if grasaMaxStr := c.QueryParam("porcentaje_grasa_max"); grasaMaxStr != "" {
+		if grasaMax, err := strconv.ParseFloat(grasaMaxStr, 64); err == nil {
+			filtrados := pacientes[:0]
+			for _, p := range pacientes {
+				if p.PorcentajeGrasa <= grasaMax {
 					filtrados = append(filtrados, p)
 				}
 			}
@@ -366,13 +391,51 @@ func DeletePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// HealthCheck devuelve el estado operativo del servicio y el modo de persistencia activo.
+func HealthCheck(c echo.Context, repo firestore.PacienteRepository) error {
+	storage := "firestore"
+	if _, isMock := repo.(*firestore.MockPacienteRepository); isMock {
+		storage = "mock"
+	}
+	return c.JSON(http.StatusOK, map[string]string{
+		"status":  "ok",
+		"storage": storage,
+	})
+}
+
+// CountPacientes devuelve el total de pacientes registrados en el repositorio.
+func CountPacientes(c echo.Context, repo firestore.PacienteRepository) error {
+	pacientes, err := repo.GetAll(c.Request().Context(), 0, 0)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
+	}
+	return c.JSON(http.StatusOK, map[string]int{
+		"total": len(pacientes),
+	})
+}
+
 // SetupRoutes configura las rutas de pacientes con inyección de dependencia.
 func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
+	e.GET("/health", func(c echo.Context) error {
+		return HealthCheck(c, repo)
+	})
 	e.GET("/pacientes", func(c echo.Context) error {
 		return GetPacientes(c, repo)
 	})
 	e.POST("/pacientes", func(c echo.Context) error {
 		return CreatePaciente(c, repo)
+	})
+	e.GET("/pacientes/search", func(c echo.Context) error {
+		return SearchPacientes(c, repo)
+	})
+	e.GET("/pacientes/stats", func(c echo.Context) error {
+		return StatsPacientes(c, repo)
+	})
+	e.GET("/pacientes/count", func(c echo.Context) error {
+		return CountPacientes(c, repo)
+	})
+	e.GET("/pacientes/edad/{edad}", func(c echo.Context) error {
+		return GetPacientesPorEdad(c, repo)
 	})
 	e.GET("/pacientes/{id}", func(c echo.Context) error {
 		return GetPacienteByID(c, repo)
@@ -385,14 +448,5 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.DELETE("/pacientes/{id}", func(c echo.Context) error {
 		return DeletePaciente(c, repo)
-	})
-	e.GET("/pacientes/search", func(c echo.Context) error {
-		return SearchPacientes(c, repo)
-	})
-	e.GET("/pacientes/stats", func(c echo.Context) error {
-		return StatsPacientes(c, repo)
-	})
-	e.GET("/pacientes/edad/{edad}", func(c echo.Context) error {
-		return GetPacientesPorEdad(c, repo)
 	})
 }
