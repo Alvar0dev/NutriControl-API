@@ -12,8 +12,9 @@ NutriControl API proporciona endpoints para gestión de pacientes (Go + Echo v4)
 - **Persistence**: Firestore (`pkg/firestore/repo.go`, `paciente_repo.go`) con mock (`mock.go`).
 - **State**: Persistencia operativa, CRUD completo (`GET/POST/PUT/PATCH/DELETE` por ID). Tests presentes (`handlers/`, `models/`).
 - **Mock**: `Create` asigna `paciente-<n>` automáticamente cuando `p.ID` está vacío (contador atómico `nextID`). Respeta el ID si ya viene. `GetByID`, `Update` y `Delete` implementados sobre el store en memoria.
-- **Filtro nombre**: `GET /pacientes?nombre=` filtra por coincidencia parcial, sin distinción de mayúsculas/minúsculas.
-- **Search**: `GET /pacientes/search` con filtros `nombre` (parcial, case-insensitive), `edad_min`/`edad_max`, `peso_min`/`peso_max`, `porcentaje_grasa_min`/`porcentaje_grasa_max` y paginación `limit` (default 10) / `offset` (default 0). Filtro en memoria sobre `repo.GetAll`.
+- **Filtro nombre y ordenamiento**: `GET /pacientes?nombre=&sort=&order=` filtra por coincidencia parcial y ordena por `nombre`, `edad`, `peso`, `porcentaje_grasa` en `asc`/`desc`.
+- **Search**: `GET /pacientes/search` con filtros `nombre` (parcial, case-insensitive), `edad_min`/`edad_max`, `peso_min`/`peso_max`, `porcentaje_grasa_min`/`porcentaje_grasa_max`, ordenamiento `sort`/`order` y paginación `limit` (default 10) / `offset` (default 0). Filtro y orden en memoria sobre `repo.GetAll`.
+- **Export CSV**: `GET /pacientes/export` descarga el listado completo en formato CSV compatible con RFC 4180 (`attachment; filename="pacientes.csv"`). Tests: `TestExportPacientesCSVOK`, `TestExportPacientesCSVVacio`, `TestExportPacientesCSVRutaRegistrada`.
 - **Stats**: `GET /pacientes/stats` devuelve resumen de solo lectura: `total`, `edad_promedio`, `peso_promedio`, `porcentaje_grasa_promedio`, `edades[]`, `pesos[]`.
 - **Count**: `GET /pacientes/count` devuelve `{"total": <n>}` consultando `repo.GetAll(ctx, 0, 0)`. Tests: `TestCountPacientesOK`, `TestCountPacientesVacio`.
 - **Health**: `GET /health` devuelve `{"status": "ok", "storage": "mock"|"firestore"}` según el adaptador inyectado. Test: `TestHealthCheckOK`.

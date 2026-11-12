@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,8 +34,49 @@ func paginacionDesdeQuery(c echo.Context) (limit, offset int) {
 	return limit, offset
 }
 
+// ordenarPacientes ordena un slice de pacientes en memoria según el campo y sentido solicitados.
+// Campos soportados: "nombre", "edad", "peso", "porcentaje_grasa".
+// Sentidos soportados: "asc" (por defecto) y "desc".
+func ordenarPacientes(pacientes []models.Paciente, sortCampo, orden string) {
+	if sortCampo == "" {
+		return
+	}
+	desc := strings.ToLower(orden) == "desc"
+	switch strings.ToLower(sortCampo) {
+	case "nombre":
+		sort.SliceStable(pacientes, func(i, j int) bool {
+			if desc {
+				return strings.ToLower(pacientes[i].Nombre) > strings.ToLower(pacientes[j].Nombre)
+			}
+			return strings.ToLower(pacientes[i].Nombre) < strings.ToLower(pacientes[j].Nombre)
+		})
+	case "edad":
+		sort.SliceStable(pacientes, func(i, j int) bool {
+			if desc {
+				return pacientes[i].Edad > pacientes[j].Edad
+			}
+			return pacientes[i].Edad < pacientes[j].Edad
+		})
+	case "peso":
+		sort.SliceStable(pacientes, func(i, j int) bool {
+			if desc {
+				return pacientes[i].Peso > pacientes[j].Peso
+			}
+			return pacientes[i].Peso < pacientes[j].Peso
+		})
+	case "porcentaje_grasa":
+		sort.SliceStable(pacientes, func(i, j int) bool {
+			if desc {
+				return pacientes[i].PorcentajeGrasa > pacientes[j].PorcentajeGrasa
+			}
+			return pacientes[i].PorcentajeGrasa < pacientes[j].PorcentajeGrasa
+		})
+	}
+}
+
 // GetPacientes obtiene todos los pacientes mediante el repositorio.
-// Soporta filtro opcional por nombre (?nombre=, coincidencia parcial, sin distinción de mayúsculas)
+// Soporta filtro opcional por nombre (?nombre=, coincidencia parcial, sin distinción de mayúsculas),
+// ordenamiento (?sort=nombre|edad|peso|porcentaje_grasa&order=asc|desc)
 // y paginación nativa del repositorio (?limit, ?offset).
 func GetPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 	limit, offset := paginacionDesdeQuery(c)
@@ -51,6 +94,7 @@ func GetPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 		}
 		pacientes = filtrados
 	}
+	ordenarPacientes(pacientes, c.QueryParam("sort"), c.QueryParam("order"))
 	return c.JSON(http.StatusOK, pacientes)
 }
 
@@ -152,6 +196,8 @@ func SearchPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 			pacientes = filtrados
 		}
 	}
+
+	ordenarPacientes(pacientes, c.QueryParam("sort"), c.QueryParam("order"))
 
 	return c.JSON(http.StatusOK, pacientes)
 }
@@ -414,6 +460,44 @@ func CountPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 	})
 }
 
+// ExportPacientesCSV genera un archivo CSV con el listado completo de pacientes registrados.
+// Retorna Content-Type: text/csv; charset=utf-8 y Content-Disposition para forzar descarga.
+func ExportPacientesCSV(c echo.Context, repo firestore.PacienteRepository) error {
+	pacientes, err := repo.GetAll(c.Request().Context(), 0, 0)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
+	}
+
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+
+	// Cabecera según RFC 4180
+	if err := writer.Write([]string{"id", "nombre", "edad", "peso", "porcentaje_grasa", "notas"}); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al generar CSV"})
+	}
+
+	for _, p := range pacientes {
+		record := []string{
+			p.ID,
+			p.Nombre,
+			strconv.Itoa(p.Edad),
+			strconv.FormatFloat(p.Peso, 'f', -1, 64),
+			strconv.FormatFloat(p.PorcentajeGrasa, 'f', -1, 64),
+			p.Notas,
+		}
+		if err := writer.Write(record); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al escribir registro en CSV"})
+		}
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al finalizar CSV"})
+	}
+
+	c.Response().Header().Set(echo.HeaderContentDisposition, `attachment; filename="pacientes.csv"`)
+	return c.Blob(http.StatusOK, "text/csv; charset=utf-8", buf.Bytes())
+}
+
 // SetupRoutes configura las rutas de pacientes con inyección de dependencia.
 func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	e.GET("/health", func(c echo.Context) error {
@@ -433,6 +517,9 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.GET("/pacientes/count", func(c echo.Context) error {
 		return CountPacientes(c, repo)
+	})
+	e.GET("/pacientes/export", func(c echo.Context) error {
+		return ExportPacientesCSV(c, repo)
 	})
 	e.GET("/pacientes/edad/{edad}", func(c echo.Context) error {
 		return GetPacientesPorEdad(c, repo)

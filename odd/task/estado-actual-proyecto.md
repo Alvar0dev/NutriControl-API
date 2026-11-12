@@ -38,6 +38,8 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T17 | S1 | inline | done | `8d32dd6` feat: endpoint `GET /health` (`HealthCheck` + `TestHealthCheckOK`) |
 | T18 | S1 | inline | done | `8d32dd6` feat: endpoint `GET /pacientes/count` (`CountPacientes` + `TestCountPacientesOK`, `TestCountPacientesVacio`) |
 | T19 | S1 | inline | done | `8d32dd6` feat: filtros `porcentaje_grasa_min`/`max` en `GET /pacientes/search` (`TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax`) |
+| T20 | S1 | inline | done | Ordenamiento dinámico en `GET /pacientes` y `GET /pacientes/search` (`sort`/`order`, `TestGetPacientesOrdenamiento`, `TestSearchPacientesOrdenamiento`) |
+| T21 | S1 | inline | done | Endpoint `GET /pacientes/export` (exportación CSV RFC 4180, `TestExportPacientesCSVOK`, `TestExportPacientesCSVVacio`, `TestExportPacientesCSVRutaRegistrada`) |
 
 ## Log
 
@@ -89,3 +91,9 @@ L14: [asistente] Implementadas test-first las 3 opciones planteadas (`v1.0.8`, c
 - `GET /pacientes/search` (`SearchPacientes`): agregados filtros `porcentaje_grasa_min` y `porcentaje_grasa_max`. Test table-driven: `TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax` (ajustado al seed real de `mock.go`: Juan 18.5%, Maria 22.0%).
 - Rutas estáticas agrupadas antes de `/pacientes/{id}` en `SetupRoutes`.
 - Documentación completa con dificultades y decisiones de diseño actualizada en `AGENTS.md`, `PROJECT_INDEX.md` (secciones 6.10 y 6.11), `docs/CHANGELOG.md` (v1.0.8), `odd/task/estado-actual-proyecto.md` y `todo`. `go test ./...`, `go vet ./...`, `go build ./...` todos verdes y pusheados a `origin/main`.
+
+L15: [usuario] "haz 1 y 2"
+L15: [asistente] Implementadas test-first las opciones 1 y 2 (v1.0.9):
+- Opción 1: Ordenamiento dinámico en memoria (`sort` por `nombre`, `edad`, `peso`, `porcentaje_grasa`; `order` por `asc` o `desc`) para `GET /pacientes` y `GET /pacientes/search`. Tests: `TestGetPacientesOrdenamiento` y `TestSearchPacientesOrdenamiento`.
+- Opción 2: Endpoint `GET /pacientes/export` para volcado completo en formato CSV compatible con RFC 4180 mediante `encoding/csv` y cabeceras de descarga (`attachment; filename="pacientes.csv"`). Tests: `TestExportPacientesCSVOK`, `TestExportPacientesCSVVacio` y `TestExportPacientesCSVRutaRegistrada`.
+- Rutas estáticas protegidas registrando `/pacientes/export` antes de `/pacientes/{id}`. `go test ./...`, `go vet ./...`, `go build ./...` verdes.

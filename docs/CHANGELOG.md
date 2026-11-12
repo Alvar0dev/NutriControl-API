@@ -1,5 +1,29 @@
 # CHANGELOG.md
 
+## Versión 1.0.9 - 2026-11-12
+
+### Ordenamiento dinámico en `GET /pacientes` y `GET /pacientes/search`, y nuevo endpoint `GET /pacientes/export` (CSV)
+
+- Función `ordenarPacientes` en `handlers/paciente.go`: ordena en memoria el slice de pacientes según `sort` (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y `order` (`asc` por defecto, o `desc`). Case-insensitive en nombres y soporte de campos numéricos.
+- Integrado ordenamiento en `GetPacientes` y en `SearchPacientes` (aplicado tras los filtros multicriterio).
+- Handler `ExportPacientesCSV` (`GET /pacientes/export`) en `handlers/paciente.go`: consulta `repo.GetAll(ctx, 0, 0)`, construye un archivo CSV compatible con RFC 4180 (`encoding/csv`), configura cabecera `Content-Type: text/csv; charset=utf-8` y `Content-Disposition: attachment; filename="pacientes.csv"`.
+- Ruta `GET /pacientes/export` registrada en `SetupRoutes` antes de `/pacientes/{id}` para evitar colisiones con el parámetro `{id}`.
+- Tests agregados en `handlers/paciente_test.go`:
+  - `TestGetPacientesOrdenamiento`: table-driven probando orden por `edad` (asc/desc), `nombre` (desc), `peso` (asc) y `porcentaje_grasa` (desc).
+  - `TestSearchPacientesOrdenamiento`: table-driven probando orden en `search` sin filtros y con filtros combinados (`edad_min=20&sort=peso&order=desc`).
+  - `TestExportPacientesCSVOK`: verifica cabeceras HTTP, fila de títulos `id,nombre,edad,peso,porcentaje_grasa,notas` y datos de los pacientes.
+  - `TestExportPacientesCSVVacio`: verifica generación exclusiva de cabecera cuando no hay registros.
+  - `TestExportPacientesCSVRutaRegistrada`: verifica a través del router de Echo que `/pacientes/export` responda 200 CSV y no caiga en el handler de `{id}` (404).
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes.
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Prioridad de rutas en Echo v4 frente a rutas parametrizadas.** Si `/pacientes/export` se registrara después de `/pacientes/{id}`, cualquier petición a `/pacientes/export` sería capturada por `GetPacienteByID` interpretando `"export"` como el ID del paciente (devolviendo `404 Not Found`). Se registró antes y se agregó un test de integración router-level (`TestExportPacientesCSVRutaRegistrada`) que ejecuta `e.ServeHTTP` para garantizar contractualmente que el router respeta la prioridad estática.
+2. **Serialización y escape estricto de CSV mediante `encoding/csv`.** En lugar de concatenar strings con comas manualmente (lo cual rompería si un paciente tiene comas o saltos de línea en el campo libre `Notas`), se utilizó `csv.NewWriter` sobre un `bytes.Buffer`. Esto garantiza cumplimiento con RFC 4180 y escape transparente con comillas dobles.
+3. **Formateo de números decimales sin pérdida de precisión ni ceros espurios.** Para los campos `peso` y `porcentaje_grasa` se optó por `strconv.FormatFloat(val, 'f', -1, 64)` en vez de `fmt.Sprintf("%.2f", val)`. El flag `-1` produce la representación exacta más corta necesaria (ej. `75.5` en vez de `75.50` y `62` en vez de `62.00`), reduciendo el tamaño del payload y evitando redondeos indeseados.
+4. **Estabilidad en el ordenamiento con `sort.SliceStable`.** Se utilizó `sort.SliceStable` para que ante valores idénticos en el campo seleccionado se conserve el ordenamiento original relativo de la colección, evitando alternancias aleatorias en peticiones sucesivas.
+
+---
 ## Versión 1.0.8 - 2026-11-10
 
 ### Endpoints `GET /health`, `GET /pacientes/count` y filtros `porcentaje_grasa_min`/`max` en `GET /pacientes/search`

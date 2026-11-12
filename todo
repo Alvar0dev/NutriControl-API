@@ -20,9 +20,9 @@
 - [done] Opción 2: Endpoint GET /pacientes/count (total de pacientes registrados) (commit 8d32dd6)
 - [done] Opción 3: Filtros por porcentaje_grasa_min / porcentaje_grasa_max en GET /pacientes/search (commit 8d32dd6)
 - [done] Documentar dificultades y decisiones de diseño v1.0.8 y plan para mañana
-- [pending] Opción 1 para mañana: Ordenamiento en GET /pacientes y GET /pacientes/search (?sort=nombre|edad|peso|porcentaje_grasa&order=asc|desc)
-- [pending] Opción 2 para mañana: Endpoint GET /pacientes/export (exportar listado de pacientes en formato CSV)
-- [pending] Opción 3 para mañana: Endpoint POST /pacientes/batch (alta múltiple validada de pacientes en una sola petición)
+- [done] Opción 1: Ordenamiento en GET /pacientes y GET /pacientes/search (?sort=nombre|edad|peso|porcentaje_grasa&order=asc|desc)
+- [done] Opción 2: Endpoint GET /pacientes/export (exportar listado de pacientes en formato CSV)
+- [pending] Opción 3: Endpoint POST /pacientes/batch (alta múltiple validada de pacientes en una sola petición)
 
 === Cierre de sesión (2026-11-10) — nota para mañana ===
 

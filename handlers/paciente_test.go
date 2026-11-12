@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1193,4 +1194,195 @@ func TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGetPacientesOrdenamiento verifica el ordenamiento por distintos campos y sentidos en GET /pacientes.
+func TestGetPacientesOrdenamiento(t *testing.T) {
+	// Seed del mock:
+	// Juan Perez:  Edad 30, Peso 75.5, PorcentajeGrasa 18.5
+	// Maria Gomez: Edad 25, Peso 62.0, PorcentajeGrasa 22.0
+	tests := []struct {
+		name          string
+		query         string
+		expectedFirst string
+		expectedLast  string
+	}{
+		{
+			name:          "ordenar por edad asc (Maria 25 primero, Juan 30 segundo)",
+			query:         "/pacientes?sort=edad&order=asc",
+			expectedFirst: "Maria Gomez",
+			expectedLast:  "Juan Perez",
+		},
+		{
+			name:          "ordenar por edad desc (Juan 30 primero, Maria 25 segundo)",
+			query:         "/pacientes?sort=edad&order=desc",
+			expectedFirst: "Juan Perez",
+			expectedLast:  "Maria Gomez",
+		},
+		{
+			name:          "ordenar por nombre desc (Maria Gomez primero, Juan Perez segundo)",
+			query:         "/pacientes?sort=nombre&order=desc",
+			expectedFirst: "Maria Gomez",
+			expectedLast:  "Juan Perez",
+		},
+		{
+			name:          "ordenar por peso asc (Maria 62.0 primero, Juan 75.5 segundo)",
+			query:         "/pacientes?sort=peso&order=asc",
+			expectedFirst: "Maria Gomez",
+			expectedLast:  "Juan Perez",
+		},
+		{
+			name:          "ordenar por porcentaje_grasa desc (Maria 22.0 primero, Juan 18.5 segundo)",
+			query:         "/pacientes?sort=porcentaje_grasa&order=desc",
+			expectedFirst: "Maria Gomez",
+			expectedLast:  "Juan Perez",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEcho()
+			repo := firestore.NewMockPacienteRepository()
+			req := httptest.NewRequest(http.MethodGet, tt.query, nil)
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			c := e.NewContext(req, httptest.NewRecorder())
+
+			err := GetPacientes(c, repo)
+
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, c.Response().Status)
+
+			var pacientes []models.Paciente
+			err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+			require.NoError(t, err)
+			require.Len(t, pacientes, 2)
+			assert.Equal(t, tt.expectedFirst, pacientes[0].Nombre)
+			assert.Equal(t, tt.expectedLast, pacientes[1].Nombre)
+		})
+	}
+}
+
+// TestSearchPacientesOrdenamiento verifica el ordenamiento en GET /pacientes/search con y sin filtros.
+func TestSearchPacientesOrdenamiento(t *testing.T) {
+	tests := []struct {
+		name          string
+		query         string
+		expectedFirst string
+		expectedLast  string
+	}{
+		{
+			name:          "search con ordenamiento por edad asc",
+			query:         "/pacientes/search?sort=edad&order=asc",
+			expectedFirst: "Maria Gomez",
+			expectedLast:  "Juan Perez",
+		},
+		{
+			name:          "search con filtro edad_min=20 y ordenamiento por peso desc",
+			query:         "/pacientes/search?edad_min=20&sort=peso&order=desc",
+			expectedFirst: "Juan Perez",
+			expectedLast:  "Maria Gomez",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEcho()
+			repo := firestore.NewMockPacienteRepository()
+			req := httptest.NewRequest(http.MethodGet, tt.query, nil)
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			c := e.NewContext(req, httptest.NewRecorder())
+
+			err := SearchPacientes(c, repo)
+
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, c.Response().Status)
+
+			var pacientes []models.Paciente
+			err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &pacientes)
+			require.NoError(t, err)
+			require.Len(t, pacientes, 2)
+			assert.Equal(t, tt.expectedFirst, pacientes[0].Nombre)
+			assert.Equal(t, tt.expectedLast, pacientes[1].Nombre)
+		})
+	}
+}
+
+// TestExportPacientesCSVOK verifica la exportación de pacientes en formato CSV (cabeceras RFC 4180 y datos).
+func TestExportPacientesCSVOK(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/export", nil)
+	c := e.NewContext(req, rec)
+
+	// Act
+	err := ExportPacientesCSV(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Header().Get(echo.HeaderContentType), "text/csv")
+	assert.Equal(t, `attachment; filename="pacientes.csv"`, rec.Header().Get(echo.HeaderContentDisposition))
+
+	reader := csv.NewReader(rec.Body)
+	records, err := reader.ReadAll()
+	require.NoError(t, err)
+
+	// Cabecera + 2 pacientes del seed
+	require.Len(t, records, 3)
+	assert.Equal(t, []string{"id", "nombre", "edad", "peso", "porcentaje_grasa", "notas"}, records[0])
+
+	// Paciente 1 (Juan Perez)
+	assert.Equal(t, "Juan Perez", records[1][1])
+	assert.Equal(t, "30", records[1][2])
+	assert.Equal(t, "75.5", records[1][3])
+	assert.Equal(t, "18.5", records[1][4])
+	assert.Equal(t, "Primera consulta", records[1][5])
+
+	// Paciente 2 (Maria Gomez)
+	assert.Equal(t, "Maria Gomez", records[2][1])
+	assert.Equal(t, "25", records[2][2])
+	assert.Equal(t, "62", records[2][3])
+	assert.Equal(t, "22", records[2][4])
+	assert.Equal(t, "Seguimiento mensual", records[2][5])
+}
+
+// TestExportPacientesCSVVacio verifica que un repositorio sin pacientes genere únicamente la cabecera CSV.
+func TestExportPacientesCSVVacio(t *testing.T) {
+	// Arrange
+	e := newTestEcho()
+	repo := &firestore.MockPacienteRepository{}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/export", nil)
+	c := e.NewContext(req, rec)
+
+	// Act
+	err := ExportPacientesCSV(c, repo)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	reader := csv.NewReader(rec.Body)
+	records, err := reader.ReadAll()
+	require.NoError(t, err)
+
+	require.Len(t, records, 1)
+	assert.Equal(t, []string{"id", "nombre", "edad", "peso", "porcentaje_grasa", "notas"}, records[0])
+}
+
+// TestExportPacientesCSVRutaRegistrada verifica que el router dirija /pacientes/export al handler de exportación
+// y no caiga en /pacientes/{id}.
+func TestExportPacientesCSVRutaRegistrada(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/export", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Header().Get(echo.HeaderContentType), "text/csv")
 }
