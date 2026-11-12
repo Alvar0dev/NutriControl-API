@@ -254,6 +254,7 @@ go vet ./...                     # Verificación estándar
 10. **Elección de `GET /pacientes/count` acorde al modelo de dominio**: dado que `models.Paciente` no incluye `Altura`, se descartó calcular IMC y se implementó `GET /pacientes/count` sobre `repo.GetAll(ctx, 0, 0)`, respetando la estructura de datos existente.
 11. **Verificación contra el seed real del mock en tests table-driven**: en la primera corrida de `TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax` se detectó que en `NewMockPacienteRepository()` `Juan Perez` tiene `18.5%` de grasa y `Maria Gomez` tiene `22.0%` (al revés de lo supuesto inicialmente), ajustándose las aserciones al estado real del seed.
 12. **Colisión estática vs paramétrica en `/pacientes/export` y test de integración router-level**: para asegurar que `GET /pacientes/export` no fuera capturado por `/pacientes/{id}` con `{id} = "export"`, se registró antes y se cubrió con `TestExportPacientesCSVRutaRegistrada` usando `e.ServeHTTP`. Además, se utilizó `encoding/csv.NewWriter` para respetar RFC 4180 y formateo decimal con `strconv.FormatFloat(val, 'f', -1, 64)`.
+13. **Diagnóstico de configuración en relay de revisión RDD**: el proceso de revisión nativa identificó falta de modelo para la clave `review-readability` en la configuración global de Gentle AI (`models.json`). Bajo el contrato RDD, el fallo en transporte de lentes externas queda documentado como blocker de configuración y no afecta los contratos de compilación, tests locales ni entrega ordinaria de Git.
 
 ## 7. Convenciones de entrega
 

@@ -22,6 +22,7 @@
 2. **Serialización y escape estricto de CSV mediante `encoding/csv`.** En lugar de concatenar strings con comas manualmente (lo cual rompería si un paciente tiene comas o saltos de línea en el campo libre `Notas`), se utilizó `csv.NewWriter` sobre un `bytes.Buffer`. Esto garantiza cumplimiento con RFC 4180 y escape transparente con comillas dobles.
 3. **Formateo de números decimales sin pérdida de precisión ni ceros espurios.** Para los campos `peso` y `porcentaje_grasa` se optó por `strconv.FormatFloat(val, 'f', -1, 64)` en vez de `fmt.Sprintf("%.2f", val)`. El flag `-1` produce la representación exacta más corta necesaria (ej. `75.5` en vez de `75.50` y `62` en vez de `62.00`), reduciendo el tamaño del payload y evitando redondeos indeseados.
 4. **Estabilidad en el ordenamiento con `sort.SliceStable`.** Se utilizó `sort.SliceStable` para que ante valores idénticos en el campo seleccionado se conserve el ordenamiento original relativo de la colección, evitando alternancias aleatorias en peticiones sucesivas.
+5. **Diagnóstico de configuración en la relay de revisión externa (RDD).** Al activar el flujo de revisión nativa con las lentes `review-readability` y `review-reliability`, la infraestructura de relay del host reportó la ausencia de modelo asignado para la clave `review-readability` en `models.json`. Conforme al contrato RDD, el bloqueo de configuración externa no afecta la suite funcional local (`go test ./...` 44/44 pasando) ni interrumpe la entrega ordinaria del repositorio.
 
 ---
 ## Versión 1.0.8 - 2026-11-10

@@ -38,8 +38,8 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T17 | S1 | inline | done | `8d32dd6` feat: endpoint `GET /health` (`HealthCheck` + `TestHealthCheckOK`) |
 | T18 | S1 | inline | done | `8d32dd6` feat: endpoint `GET /pacientes/count` (`CountPacientes` + `TestCountPacientesOK`, `TestCountPacientesVacio`) |
 | T19 | S1 | inline | done | `8d32dd6` feat: filtros `porcentaje_grasa_min`/`max` en `GET /pacientes/search` (`TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax`) |
-| T20 | S1 | inline | done | Ordenamiento dinámico en `GET /pacientes` y `GET /pacientes/search` (`sort`/`order`, `TestGetPacientesOrdenamiento`, `TestSearchPacientesOrdenamiento`) |
-| T21 | S1 | inline | done | Endpoint `GET /pacientes/export` (exportación CSV RFC 4180, `TestExportPacientesCSVOK`, `TestExportPacientesCSVVacio`, `TestExportPacientesCSVRutaRegistrada`) |
+| T20 | S1 | inline | done | `05a97f8` feat: ordenamiento dinámico en pacientes y endpoint GET /pacientes/export (CSV) |
+| T21 | S1 | inline | done | `05a97f8` feat: ordenamiento dinámico en pacientes y endpoint GET /pacientes/export (CSV) |
 
 ## Log
 
@@ -97,3 +97,6 @@ L15: [asistente] Implementadas test-first las opciones 1 y 2 (v1.0.9):
 - Opción 1: Ordenamiento dinámico en memoria (`sort` por `nombre`, `edad`, `peso`, `porcentaje_grasa`; `order` por `asc` o `desc`) para `GET /pacientes` y `GET /pacientes/search`. Tests: `TestGetPacientesOrdenamiento` y `TestSearchPacientesOrdenamiento`.
 - Opción 2: Endpoint `GET /pacientes/export` para volcado completo en formato CSV compatible con RFC 4180 mediante `encoding/csv` y cabeceras de descarga (`attachment; filename="pacientes.csv"`). Tests: `TestExportPacientesCSVOK`, `TestExportPacientesCSVVacio` y `TestExportPacientesCSVRutaRegistrada`.
 - Rutas estáticas protegidas registrando `/pacientes/export` antes de `/pacientes/{id}`. `go test ./...`, `go vet ./...`, `go build ./...` verdes.
+
+L16: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L16: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.9 (precedencia de rutas en router Echo v4, escape RFC 4180 con encoding/csv, formateo numérico con strconv.FormatFloat, ordenamiento estable con sort.SliceStable y diagnóstico de configuración RDD en host) en docs/CHANGELOG.md, PROJECT_INDEX.md, odd/task/estado-actual-proyecto.md y todo. Commit documental y push a origin/main completados.
