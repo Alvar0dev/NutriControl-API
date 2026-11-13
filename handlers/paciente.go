@@ -296,6 +296,41 @@ func CreatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	return c.JSON(http.StatusCreated, pacienteCreado)
 }
 
+// CreatePacientesBatch crea un lote de nuevos pacientes mediante el repositorio en una operación atómica a nivel de validación.
+// Si algún paciente del lote es inválido o el lote está vacío, se rechaza la petición completa (400 Bad Request)
+// sin persistir ningún paciente. Si todos son válidos, se crean y devuelven con 201 Created.
+func CreatePacientesBatch(c echo.Context, repo firestore.PacienteRepository) error {
+	var pacientes []models.Paciente
+	if err := c.Bind(&pacientes); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+	if len(pacientes) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El lote de pacientes no puede estar vacío"})
+	}
+
+	// Fase de normalización y validación atómica: todos deben ser válidos antes de persistir
+	for i := range pacientes {
+		pacientes[i].Nombre = normalizarNombre(pacientes[i].Nombre)
+		if err := validarPaciente(pacientes[i]); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("Paciente en posición %d inválido: %s", i, err.Error()),
+			})
+		}
+	}
+
+	// Fase de persistencia: todos pasaron validación
+	creados := make([]*models.Paciente, 0, len(pacientes))
+	for _, p := range pacientes {
+		creado, err := repo.Create(c.Request().Context(), p)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al crear paciente del lote"})
+		}
+		creados = append(creados, creado)
+	}
+
+	return c.JSON(http.StatusCreated, creados)
+}
+
 // UpdatePaciente actualiza un paciente existente por ID.
 // El nombre se normaliza (trim y capitalización) antes de validar y guardar.
 func UpdatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
@@ -508,6 +543,9 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.POST("/pacientes", func(c echo.Context) error {
 		return CreatePaciente(c, repo)
+	})
+	e.POST("/pacientes/batch", func(c echo.Context) error {
+		return CreatePacientesBatch(c, repo)
 	})
 	e.GET("/pacientes/search", func(c echo.Context) error {
 		return SearchPacientes(c, repo)

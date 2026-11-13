@@ -1386,3 +1386,107 @@ func TestExportPacientesCSVRutaRegistrada(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Header().Get(echo.HeaderContentType), "text/csv")
 }
+
+// TestCreatePacientesBatchOK verifica que se pueda crear un lote de pacientes válidos con 201 Created y que se asignen IDs.
+func TestCreatePacientesBatchOK(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `[
+		{"nombre":"  carlos tevez  ","edad":35,"peso":75.0,"porcentaje_grasa":15.0,"notas":"Atleta"},
+		{"nombre":"lucia galan","edad":42,"peso":62.0,"porcentaje_grasa":22.5,"notas":"Control"}
+	]`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes/batch", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	err := CreatePacientesBatch(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, c.Response().Status)
+
+	var creados []models.Paciente
+	err = json.Unmarshal(c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &creados)
+	require.NoError(t, err)
+	require.Len(t, creados, 2)
+	assert.Equal(t, "Carlos Tevez", creados[0].Nombre)
+	assert.NotEmpty(t, creados[0].ID)
+	assert.Equal(t, "Lucia Galan", creados[1].Nombre)
+	assert.NotEmpty(t, creados[1].ID)
+
+	// Verificar que el repositorio ahora tiene 4 pacientes (2 iniciales + 2 creados)
+	todos, err := repo.GetAll(context.Background(), 0, 0)
+	require.NoError(t, err)
+	assert.Len(t, todos, 4)
+}
+
+// TestCreatePacientesBatchVacio verifica que un lote vacío devuelva 400 Bad Request.
+func TestCreatePacientesBatchVacio(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `[]`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes/batch", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	err := CreatePacientesBatch(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+	assert.Contains(t, c.Response().Writer.(*httptest.ResponseRecorder).Body.String(), "El lote de pacientes no puede estar vacío")
+}
+
+// TestCreatePacientesBatchAtomicidadInvalido verifica que si un elemento del lote es inválido,
+// la petición falle con 400 Bad Request y NO se inserte ningún paciente (atomicidad).
+func TestCreatePacientesBatchAtomicidadInvalido(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	// Primer paciente válido, segundo con edad inválida (-10)
+	payload := `[
+		{"nombre":"Paciente Valido","edad":30,"peso":70.0,"porcentaje_grasa":18.0},
+		{"nombre":"Paciente Invalido","edad":-10,"peso":70.0,"porcentaje_grasa":18.0}
+	]`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes/batch", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	err := CreatePacientesBatch(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+	assert.Contains(t, c.Response().Writer.(*httptest.ResponseRecorder).Body.String(), "edad")
+
+	// Verificar atomicidad: el repo DEBE seguir teniendo solo los 2 pacientes iniciales
+	todos, err := repo.GetAll(context.Background(), 0, 0)
+	require.NoError(t, err)
+	assert.Len(t, todos, 2)
+}
+
+// TestCreatePacientesBatchJSONInvalido verifica error 400 ante payload no parseable.
+func TestCreatePacientesBatchJSONInvalido(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"esto_no_es_un_array": true}`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes/batch", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	err := CreatePacientesBatch(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+}
+
+// TestCreatePacientesBatchRutaRegistrada verifica que el router dirija POST /pacientes/batch correctamente.
+func TestCreatePacientesBatchRutaRegistrada(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	payload := `[{"nombre":"Test Router","edad":25,"peso":60.0,"porcentaje_grasa":15.0}]`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes/batch", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+}
