@@ -23,11 +23,13 @@
 - [done] Opción 1: Ordenamiento en GET /pacientes y GET /pacientes/search (?sort=nombre|edad|peso|porcentaje_grasa&order=asc|desc) (commit 05a97f8)
 - [done] Opción 2: Endpoint GET /pacientes/export (exportar listado de pacientes en formato CSV) (commit 05a97f8)
 - [done] Documentar dificultades y decisiones de diseño v1.0.9 y plan para mañana
-- [pending] Opción 1 para mañana: Endpoint POST /pacientes/batch (alta múltiple validada de pacientes en una sola petición)
-- [pending] Opción 2 para mañana: Endpoint GET /pacientes/imc/{id} (incorporar campo Altura en modelo de dominio y cálculo de IMC)
+- [done] Opción 1: Endpoint POST /pacientes/batch (alta múltiple validada de pacientes en una sola petición) (v1.0.10)
+- [done] Documentar dificultades y decisiones de diseño v1.0.10 y plan para mañana
+- [pending] Opción 1 para mañana: Endpoint GET /pacientes/imc/{id} (incorporar campo Altura en modelo de dominio y cálculo de IMC)
+- [pending] Opción 2 para mañana: Endpoint GET /pacientes/reporte (agrupación analítica por rangos etarios o nutricionales)
 - [pending] Opción 3 para mañana: Asignar modelo a lente review-readability en models.json si se desea reactivar RDD
 
-=== Cierre de sesión (2026-11-12) — nota para mañana ===
+=== Cierre de sesión (2026-11-13) — nota para mañana ===
 
-Estado git: rama main sincronizada con origin/main, working tree limpio, go test/vet/build todos verdes.
+Estado git: rama main sincronizada con origin/main, working tree limpio, go test/vet/build todos verdes (49 tests).
 Mañana elegir una o varias de las opciones pendientes (1, 2 o 3) e implementarlas test-first (RED -> GREEN -> refactor).

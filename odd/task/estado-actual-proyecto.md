@@ -40,6 +40,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T19 | S1 | inline | done | `8d32dd6` feat: filtros `porcentaje_grasa_min`/`max` en `GET /pacientes/search` (`TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax`) |
 | T20 | S1 | inline | done | `05a97f8` feat: ordenamiento dinámico en pacientes y endpoint GET /pacientes/export (CSV) |
 | T21 | S1 | inline | done | `05a97f8` feat: ordenamiento dinámico en pacientes y endpoint GET /pacientes/export (CSV) |
+| T22 | S1 | inline | done | `00e49ce` feat: endpoint POST /pacientes/batch para alta masiva validada |
 
 ## Log
 
@@ -100,3 +101,16 @@ L15: [asistente] Implementadas test-first las opciones 1 y 2 (v1.0.9):
 
 L16: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
 L16: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.9 (precedencia de rutas en router Echo v4, escape RFC 4180 con encoding/csv, formateo numérico con strconv.FormatFloat, ordenamiento estable con sort.SliceStable y diagnóstico de configuración RDD en host) en docs/CHANGELOG.md, PROJECT_INDEX.md, odd/task/estado-actual-proyecto.md y todo. Commit documental y push a origin/main completados.
+
+L17: [usuario] "haz 1" (Endpoint POST /pacientes/batch alta masiva validada)
+L17: [asistente] Implementado test-first el endpoint `POST /pacientes/batch` (`CreatePacientesBatch`):
+- Validación atómica en 2 fases: rechazo de lote vacío `[]` con `400 Bad Request`, normalización de nombres y validación clínica (`validarPaciente`). Si algún elemento es inválido, rechaza inmediatamente con `400 Bad Request` indicando la posición del paciente y no persiste ningún registro en el repositorio (cero escrituras parciales).
+- Persistencia secuencial de registros válidos y respuesta `201 Created` con el slice de pacientes y sus IDs generados.
+- Ruta registrada en `SetupRoutes`.
+- Tests agregados en `handlers/paciente_test.go`: `TestCreatePacientesBatchOK`, `TestCreatePacientesBatchVacio`, `TestCreatePacientesBatchAtomicidadInvalido`, `TestCreatePacientesBatchJSONInvalido` y `TestCreatePacientesBatchRutaRegistrada`.
+- `go test ./...`, `go vet ./...` y `go build ./...` todos verdes (49 tests).
+
+L18: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L18: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.10 (garantía de atomicidad sin transacciones distribuidas en storage, compatibilidad con la firma de repo.Create retornando *models.Paciente, rechazo estricto de array vacío) en docs/CHANGELOG.md, PROJECT_INDEX.md (3.2, 6.12 y dificultad 14), AGENTS.md, odd/task/estado-actual-proyecto.md y todo.
+- Commiteado y pusheado a origin/main.
+- Planteado el estado actual y los TODOs para la próxima sesión (Opción 1: Extensión de Dominio con Altura e IMC; Opción 2: Agrupación analítica por rangos etarios/nutricionales; Opción 3: Configuración de host RDD).

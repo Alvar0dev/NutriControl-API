@@ -1,5 +1,31 @@
 # CHANGELOG.md
 
+## Versión 1.0.10 - 2026-11-13
+
+### Endpoint `POST /pacientes/batch` (Alta masiva de pacientes con validación atómica)
+
+- Handler `CreatePacientesBatch` (`POST /pacientes/batch`) en `handlers/paciente.go`: permite dar de alta una colección de pacientes en una sola llamada HTTP.
+- Validación atómica en dos fases:
+  1. Si el payload no es un JSON válido o la lista está vacía (`[]`), responde `400 Bad Request` con mensaje explicativo (`"El lote de pacientes no puede estar vacío"`).
+  2. Normaliza (`normalizarNombre`) y valida (`validarPaciente`) cada elemento. Si cualquier paciente incumple las reglas clínicas (edad 1–120, peso 0–500, grasa 0–100, nombre requerido), la petición se rechaza de inmediato con `400 Bad Request` señalando el índice fallido (`"Paciente en posición %d inválido: %s"`).
+  3. Solo cuando el 100% del lote es válido, se procede con la persistencia secuencial en el repositorio (`repo.Create`), garantizando que no queden pacientes persistidos parcialmente ante errores de validación.
+- Devuelve `201 Created` con el slice completo de pacientes y sus identificadores únicos asignados.
+- Ruta registrada en `SetupRoutes`.
+- Tests agregados en `handlers/paciente_test.go`:
+  - `TestCreatePacientesBatchOK`: verifica creación de lote de 2 pacientes válidos con espacios en nombres, confirmando normalización, asignación de IDs y persistencia en el repositorio (total 4 pacientes).
+  - `TestCreatePacientesBatchVacio`: verifica que un slice `[]` retorne `400 Bad Request`.
+  - `TestCreatePacientesBatchAtomicidadInvalido`: verifica que ante un paciente válido seguido de uno inválido, se retorne `400 Bad Request` y el repositorio conserve estrictamente los registros previos (cero escrituras parciales).
+  - `TestCreatePacientesBatchJSONInvalido`: verifica respuesta `400 Bad Request` ante cuerpos no serializables en array de pacientes.
+  - `TestCreatePacientesBatchRutaRegistrada`: test router-level que verifica que `POST /pacientes/batch` responda `201 Created` a través del router de Echo.
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes (49 tests totales).
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Garantía de atomicidad sin transacciones distribuidas en storage.** Sin imponer requisitos de soporte transaccional ACID en la interfaz abstracta `PacienteRepository` (que debe soportar tanto Firestore como el Mock en memoria o futuras bases SQL/NoSQL), la atomicidad frente a datos inválidos se resolvió separando la lógica en dos pasadas: (1) validación estricta de todo el lote en memoria, y (2) persistencia efectiva solo tras haber aprobado todos los registros. Si el segundo registro falla, no se llega a insertar el primero.
+2. **Compatibilidad de tipos con la firma de `repo.Create`.** `PacienteRepository.Create` retorna `(*models.Paciente, error)`. Al acumular las respuestas para la respuesta HTTP, el slice `creados` se definió como `[]*models.Paciente` para admitir directamente las referencias devueltas por el adaptador sin conversiones redundantes y serializar limpiamente como array JSON en Echo.
+3. **Manejo explícito de lotes vacíos.** Enviar un array vacío `[]` no debe generar operaciones vacías ni devolver `201 Created`. Se rechaza explícitamente con `400 Bad Request` y mensaje `"El lote de pacientes no puede estar vacío"`.
+
+---
 ## Versión 1.0.9 - 2026-11-12
 
 ### Ordenamiento dinámico en `GET /pacientes` y `GET /pacientes/search`, y nuevo endpoint `GET /pacientes/export` (CSV)

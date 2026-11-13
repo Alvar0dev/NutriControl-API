@@ -66,6 +66,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | GET | `/health` | HealthCheck | — (inspección de adaptador) | 200 OK `{"status": "ok", "storage": "mock"\|"firestore"}` |
 | GET | `/pacientes` | GetPacientes | GetAll(ctx, limit, offset) | 200 OK `[Paciente]` |
 | POST | `/pacientes` | CreatePaciente | Create | 201 Created `Paciente` (el mock asigna `ID` si viene vacío) |
+| POST | `/pacientes/batch` | CreatePacientesBatch | Create (múltiple) | 201 Created `[Paciente]` con IDs asignados / 400 Bad Request si vacío o algún elemento inválido |
 | GET | `/pacientes/{id}` | GetPacienteByID | GetByID | 200 OK `Paciente` / 404 |
 | PUT | `/pacientes/{id}` | UpdatePaciente | Update | 200 OK `Paciente` / 404 / 400 |
 | PATCH | `/pacientes/{id}` | PatchPaciente | GetByID + Update | 200 OK `Paciente` / 404 / 400 |
@@ -240,7 +241,15 @@ go vet ./...                     # Verificación estándar
 - `ExportPacientesCSV` (`GET /pacientes/export`): exporta el padrón completo a CSV compatible con RFC 4180 (`id,nombre,edad,peso,porcentaje_grasa,notas`) forzando descarga con `Content-Disposition: attachment; filename="pacientes.csv"`. Registrado en `SetupRoutes` antes de `/pacientes/{id}`.
 - Tests: `TestGetPacientesOrdenamiento`, `TestSearchPacientesOrdenamiento`, `TestExportPacientesCSVOK`, `TestExportPacientesCSVVacio` y `TestExportPacientesCSVRutaRegistrada`.
 
-### 6.12 Dificultades acumuladas y decisiones de diseño
+### 6.12 Feature: Alta masiva de pacientes `POST /pacientes/batch` (v1.0.10)
+
+- Handler `CreatePacientesBatch` (`POST /pacientes/batch`): permite registrar un lote de pacientes en una única petición HTTP.
+- **Validación atómica en dos fases**:
+  1. Fase 1 (Validación y normalización): Si el lote está vacío (`[]`), se rechaza con `400 Bad Request` (`"El lote de pacientes no puede estar vacío"`). Cada paciente es normalizado (`normalizarNombre`) y validado con `validarPaciente`. Si alguno falla, la petición completa se rechaza con `400 Bad Request` indicando la posición del fallo (`"Paciente en posición N inválido: ..."`) sin guardar nada en base de datos.
+  2. Fase 2 (Persistencia): Una vez asegurada la validez del 100% del lote, se itera sobre los registros invocando `repo.Create(ctx, p)` y se responde con `201 Created` conteniendo el slice de pacientes con sus IDs asignados automáticamente.
+- Tests: `TestCreatePacientesBatchOK`, `TestCreatePacientesBatchVacio`, `TestCreatePacientesBatchAtomicidadInvalido`, `TestCreatePacientesBatchJSONInvalido` y `TestCreatePacientesBatchRutaRegistrada`.
+
+### 6.13 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -255,6 +264,7 @@ go vet ./...                     # Verificación estándar
 11. **Verificación contra el seed real del mock en tests table-driven**: en la primera corrida de `TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax` se detectó que en `NewMockPacienteRepository()` `Juan Perez` tiene `18.5%` de grasa y `Maria Gomez` tiene `22.0%` (al revés de lo supuesto inicialmente), ajustándose las aserciones al estado real del seed.
 12. **Colisión estática vs paramétrica en `/pacientes/export` y test de integración router-level**: para asegurar que `GET /pacientes/export` no fuera capturado por `/pacientes/{id}` con `{id} = "export"`, se registró antes y se cubrió con `TestExportPacientesCSVRutaRegistrada` usando `e.ServeHTTP`. Además, se utilizó `encoding/csv.NewWriter` para respetar RFC 4180 y formateo decimal con `strconv.FormatFloat(val, 'f', -1, 64)`.
 13. **Diagnóstico de configuración en relay de revisión RDD**: el proceso de revisión nativa identificó falta de modelo para la clave `review-readability` en la configuración global de Gentle AI (`models.json`). Bajo el contrato RDD, el fallo en transporte de lentes externas queda documentado como blocker de configuración y no afecta los contratos de compilación, tests locales ni entrega ordinaria de Git.
+14. **Atomicidad de validación en operaciones batch y firma de `Create`**: para prevenir estados parciales o registros huérfanos sin necesidad de transacciones complejas distribuidas a nivel de base de datos, se aplicó un ciclo de validación estricto en dos fases (validar todo antes de persistir). Además, dado que `repo.Create` devuelve `*models.Paciente`, el acumulador de respuesta tipa con `[]*models.Paciente` para devolver limpiamente el slice serializado en JSON.
 
 ## 7. Convenciones de entrega
 
