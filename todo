@@ -25,11 +25,12 @@
 - [done] Documentar dificultades y decisiones de diseño v1.0.9 y plan para mañana
 - [done] Opción 1: Endpoint POST /pacientes/batch (alta múltiple validada de pacientes en una sola petición) (v1.0.10)
 - [done] Documentar dificultades y decisiones de diseño v1.0.10 y plan para mañana
-- [pending] Opción 1 para mañana: Endpoint GET /pacientes/imc/{id} (incorporar campo Altura en modelo de dominio y cálculo de IMC)
-- [pending] Opción 2 para mañana: Endpoint GET /pacientes/reporte (agrupación analítica por rangos etarios o nutricionales)
-- [pending] Opción 3 para mañana: Asignar modelo a lente review-readability en models.json si se desea reactivar RDD
+- [done] Opción 1: Extensión de Dominio con Altura y cálculo de IMC (GET /pacientes/imc/{id} y GET /pacientes/{id}/imc) (v1.0.11) (commit d413d02)
+- [done] Documentar dificultades y decisiones de diseño v1.0.11 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
+- [pending] Opción 2: Endpoint GET /pacientes/reporte (agrupación analítica por rangos etarios o nutricionales)
+- [pending] Opción 3: Asignar modelo a lente review-readability en models.json si se desea reactivar RDD
 
-=== Cierre de sesión (2026-11-13) — nota para mañana ===
+=== Estado actual (2026-11-14) ===
 
-Estado git: rama main sincronizada con origin/main, working tree limpio, go test/vet/build todos verdes (49 tests).
-Mañana elegir una o varias de las opciones pendientes (1, 2 o 3) e implementarlas test-first (RED -> GREEN -> refactor).
+Estado git: 59 tests pasando (handlers, models, pkg/firestore), go vet/build verdes.
+Pendientes: Opción 2 (reporte analítico) y Opción 3 (host RDD).

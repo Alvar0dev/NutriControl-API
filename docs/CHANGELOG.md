@@ -1,5 +1,47 @@
 # CHANGELOG.md
 
+## Versión 1.0.11 - 2026-11-14
+
+### Extensión de Dominio con `Altura` y endpoints de cálculo de IMC (`GET /pacientes/imc/{id}` y `GET /pacientes/{id}/imc`)
+
+- **Modelo de dominio (`models.Paciente`)**: incorporación del campo `Altura float64` con etiqueta `json:"altura,omitempty"`. Al utilizar `omitempty`, valores `0` (pacientes creados sin altura previa) no rompen clientes ni esquemas serializados existentes.
+- **Validaciones de negocio clínicas en `validarPaciente`**:
+  - Constantes `alturaMinima = 0.30` y `alturaMaxima = 2.50` metros.
+  - Validación opcional: solo se evalúa si `p.Altura != 0`. Si se envía, debe estar estrictamente en el rango `[0.30, 2.50]`, rechazando valores menores, mayores o negativos con `400 Bad Request` (`"El campo 'altura' debe estar entre 0.30 y 2.50 metros"`).
+  - Aplicado automáticamente en `CreatePaciente` (`POST /pacientes`), `CreatePacientesBatch` (`POST /pacientes/batch`), `UpdatePaciente` (`PUT /pacientes/:id`) y `PatchPaciente` (`PATCH /pacientes/:id`).
+- **Adaptador Mock**: actualizado `MockPacienteRepository.Update` para persistir `m.store[i].Altura = p.Altura`.
+- **Ordenamiento dinámico**: `ordenarPacientes` ampliado con soporte de ordenamiento por `"altura"` en orden ascendente y descendente (`?sort=altura&order=asc|desc`).
+- **Endpoints de cálculo clínico de IMC**:
+  - `GET /pacientes/imc/{id}` y `GET /pacientes/{id}/imc`: invocan `GetPacienteIMC`.
+  - Verifica existencia del paciente (404 Not Found si no existe).
+  - Verifica que el paciente posea altura registrada (`altura <= 0` retorna `400 Bad Request` indicando que se requiere registrar la altura) y peso válido (`peso <= 0` retorna 400).
+  - Calcula el Índice de Masa Corporal $IMC = \frac{peso}{altura^2}$, redondeado a 2 decimales (`math.Round(imc*100)/100`).
+  - Categorización según estándares de la OMS: `< 18.5` "Bajo peso", `18.5 - 24.9` "Normal", `25.0 - 29.9` "Sobrepeso", `>= 30.0` "Obesidad".
+  - Retorna `200 OK` con struct `RespuestaIMC` (`id`, `nombre`, `peso`, `altura`, `imc`, `clasificacion`).
+- **SetupRoutes y corrección de sintaxis de router Echo**:
+  - Mapeo dual para IMC: `/pacientes/imc/:id` y `/pacientes/:id/imc`.
+  - Normalización de rutas parametrizadas registradas con sintaxis nativa de Echo (`:id` y `:edad`) además de `{id}` para asegurar el match en peticiones HTTP reales a través del router.
+- **Tests agregados (10 nuevos, suite completa en 59 tests)**:
+  - `TestPacienteJSONSerializacionConAltura`: verifica serialización de `altura` en `models`.
+  - `TestGetPacienteIMCOK`: cálculo correcto de IMC 24.65 ("Normal") con peso 75.5 y altura 1.75.
+  - `TestGetPacienteIMCRutasRegistradas`: router Echo respondiendo 200 tanto en `/pacientes/imc/:id` como en `/pacientes/:id/imc`.
+  - `TestGetPacienteIMCNoEncontrado`: 404 Not Found con ID inexistente.
+  - `TestGetPacienteIMCSinAltura`: 400 Bad Request cuando el paciente no tiene altura registrada (`altura == 0`).
+  - `TestGetPacienteIMCClasificaciones`: table-driven cubriendo las 4 categorías OMS (Bajo peso, Normal, Sobrepeso, Obesidad).
+  - `TestCreatePacienteAlturaValida`: creación exitosa de paciente con altura informada.
+  - `TestCreatePacienteAlturaFueraDeRango`: table-driven rechazando alturas menores a 0.30 m, mayores a 2.50 m y negativas con 400.
+  - `TestPatchPacienteAltura`: actualización parcial de altura vía PATCH.
+  - `TestPatchPacienteAlturaInvalida`: rechazo 400 ante altura fuera de rango en PATCH.
+- `go test ./...`, `go vet ./...`, `go build ./...` todos verdes (59 tests pasando).
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Compatibilidad hacia atrás del campo `Altura` en `models.Paciente`.** Se utilizó la etiqueta `json:"altura,omitempty"`. Al ser `Altura` de tipo `float64`, un valor `0` (paciente sin altura cargada) no se emite en el JSON si no se desea alterar contratos preexistentes, y los registros anteriores en Firestore o en tests unitarios no fallan ni requieren migración forzosa.
+2. **Sintaxis de parámetros en el router de Echo v4 (`:id` vs `{id}`).** Históricamente las rutas parametrizadas se habían registrado con `{id}` en `SetupRoutes`, lo cual funcionaba en tests unitarios directos gracias al helper de inyección con reflexión `setParam`, pero al invocar `e.ServeHTTP` a través del router de Echo, la sintaxis `{id}` era tratada como un segmento estático literal. Se solucionó registrando las rutas parametrizadas con la sintaxis nativa de Echo (`:id` y `:edad`) garantizando el ruteo real en HTTP sin romper llamadas legacy.
+3. **Ruta dual para el cálculo de IMC (`/pacientes/imc/:id` y `/pacientes/:id/imc`).** Se detectó que en especificaciones y notas previas se mencionaba `GET /pacientes/imc/{id}`, mientras que el estándar REST de diseño de APIs prescribe sub-recursos bajo la entidad (`GET /pacientes/{id}/imc`). En lugar de forzar una única convención, `SetupRoutes` mapea limpiamente ambas alternativas hacia el mismo handler `GetPacienteIMC`, maximizando la ergonomía para clientes frontend y consumidores externos.
+4. **Validación condicional de altura en `validarPaciente`.** A diferencia del peso y la edad que son de carga obligatoria para crear un paciente, la altura puede no estar disponible en la primera consulta de triage. Por ello, la regla de validación clínica de altura solo se dispara cuando `Altura != 0`. Si se envía, debe estar estrictamente dentro del rango biológico plausible (0.30 a 2.50 metros).
+
+---
 ## Versión 1.0.10 - 2026-11-13
 
 ### Endpoint `POST /pacientes/batch` (Alta masiva de pacientes con validación atómica)

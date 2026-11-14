@@ -41,6 +41,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T20 | S1 | inline | done | `05a97f8` feat: ordenamiento dinámico en pacientes y endpoint GET /pacientes/export (CSV) |
 | T21 | S1 | inline | done | `05a97f8` feat: ordenamiento dinámico en pacientes y endpoint GET /pacientes/export (CSV) |
 | T22 | S1 | inline | done | `00e49ce` feat: endpoint POST /pacientes/batch para alta masiva validada |
+| T23 | S1 | inline | done | `d413d02` feat: extensión de dominio con Altura y endpoints de cálculo de IMC |
 
 ## Log
 
@@ -114,3 +115,19 @@ L18: [usuario] "Guarda todo el proceso en la documentacion con todas las dificul
 L18: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.10 (garantía de atomicidad sin transacciones distribuidas en storage, compatibilidad con la firma de repo.Create retornando *models.Paciente, rechazo estricto de array vacío) en docs/CHANGELOG.md, PROJECT_INDEX.md (3.2, 6.12 y dificultad 14), AGENTS.md, odd/task/estado-actual-proyecto.md y todo.
 - Commiteado y pusheado a origin/main.
 - Planteado el estado actual y los TODOs para la próxima sesión (Opción 1: Extensión de Dominio con Altura e IMC; Opción 2: Agrupación analítica por rangos etarios/nutricionales; Opción 3: Configuración de host RDD).
+
+L19: [usuario] "haz el 1" (Opción 1: Extensión de Dominio con Altura y cálculo de IMC)
+L19: [asistente] Implementada test-first la extensión de dominio con `Altura` y cálculo clínico de IMC (v1.0.11):
+- `models.Paciente` ampliado con `Altura float64` (`json:"altura,omitempty"`).
+- Reglas clínicas en `validarPaciente` y `PatchPaciente`: rango de `alturaMinima = 0.30` a `alturaMaxima = 2.50` metros si se envía altura (`p.Altura != 0`).
+- Endpoint dual `GET /pacientes/imc/{id}` y `GET /pacientes/{id}/imc` (`GetPacienteIMC`): calcula $IMC = peso / altura^2$ (redondeado a 2 decimales) y clasifica según OMS (`Bajo peso`, `Normal`, `Sobrepeso`, `Obesidad`). Responde 200 con `RespuestaIMC`, 404 si el ID no existe, o 400 si el paciente no tiene altura registrada (`altura <= 0`) o peso válido (`peso <= 0`).
+- Soporte para ordenamiento por altura en `ordenarPacientes` (`?sort=altura&order=asc|desc`) y actualización en `MockPacienteRepository.Update`.
+- Normalización en `SetupRoutes` registrando rutas parametrizadas con `:id` y `:edad` para compatibilidad con el router nativo de Echo v4.
+- 10 tests nuevos agregados: 59 tests totales en verde (`go test ./...`, `go vet ./...` y `go build ./...`). Commit `d413d02`.
+
+L20: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L20: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.11 (compatibilidad hacia atrás con omitempty en Altura, sintaxis nativa de router Echo v4 :id vs {id}, ruta dual semántica /pacientes/imc/:id y sub-recurso /pacientes/:id/imc, y validación condicional de altura) en docs/CHANGELOG.md, PROJECT_INDEX.md (6.13 y dificultad 15), AGENTS.md, odd/task/estado-actual-proyecto.md y todo.
+- Commiteado y pusheado a origin/main.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: Endpoint GET /pacientes/reporte; Opción 2: Configuración host RDD).
+
+

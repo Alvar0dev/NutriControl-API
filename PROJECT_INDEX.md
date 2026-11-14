@@ -76,10 +76,12 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | GET | `/pacientes/count` | CountPacientes | GetAll(ctx, 0, 0) | 200 OK `{"total": <n>}` |
 | GET | `/pacientes/export` | ExportPacientesCSV | GetAll(ctx, 0, 0) | 200 OK `text/csv` (`attachment; filename="pacientes.csv"`) |
 | GET | `/pacientes/edad/{edad}` | GetPacientesPorEdad | GetAll(ctx, 0, 0) + filtro en memoria por edad exacta | 200 OK `[Paciente]` (vacío si no hay coincidencia) / 400 si edad no numérica |
+| GET | `/pacientes/imc/{id}` | GetPacienteIMC | GetByID | 200 OK `RespuestaIMC` `{id, nombre, peso, altura, imc, clasificacion}` / 404 / 400 si sin altura o peso inválido |
+| GET | `/pacientes/{id}/imc` | GetPacienteIMC | GetByID | 200 OK `RespuestaIMC` (alias REST sub-recurso) / 404 / 400 |
 | GET | `/` | (inline echo) | — | 200 "API NutriControl Operativa" |
 
 - `{id}` proviene de `c.Param("id")`.
-- Validaciones: `nombre` requerido; `edad` entre 1 y 120; `peso` mayor que 0 y menor o igual a 500; `porcentaje_grasa` entre 0 y 100. 400 con `{"error": "..."}` si falta o es inválido.
+- Validaciones: `nombre` requerido; `edad` entre 1 y 120; `peso` mayor que 0 y menor o igual a 500; `porcentaje_grasa` entre 0 y 100; `altura` (opcional) entre 0.30 y 2.50 metros si se envía. 400 con `{"error": "..."}` si falta o es inválido.
 - El nombre se normaliza antes de guardar: se eliminan espacios sobrantes y se capitaliza la primera letra de cada palabra (`"  juan perez  "` → `"Juan Perez"`). El nombre compuesto solo por espacios se rechaza con 400 (tanto en `POST`/`PUT` como en `PATCH`).
 
 ## 4. Contratos clave
@@ -109,6 +111,7 @@ type Paciente struct {
     Nombre          string  `json:"nombre"`
     Edad            int     `json:"edad"`
     Peso            float64 `json:"peso"`
+    Altura          float64 `json:"altura,omitempty"`
     PorcentajeGrasa float64 `json:"porcentaje_grasa"`
     Notas           string  `json:"notas"`
 }
@@ -151,7 +154,7 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` por ID), `GET /health`, filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100) y normalización de nombres. |
+| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` por ID), `GET /health`, cálculo de IMC (`GET /pacientes/imc/{id}` y `/pacientes/{id}/imc`), filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100, `altura` 0.30-2.50m) y normalización de nombres. |
 | Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). |
 | Build | `go build ./...` y `go vet ./...` OK. |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
@@ -249,22 +252,32 @@ go vet ./...                     # Verificación estándar
   2. Fase 2 (Persistencia): Una vez asegurada la validez del 100% del lote, se itera sobre los registros invocando `repo.Create(ctx, p)` y se responde con `201 Created` conteniendo el slice de pacientes con sus IDs asignados automáticamente.
 - Tests: `TestCreatePacientesBatchOK`, `TestCreatePacientesBatchVacio`, `TestCreatePacientesBatchAtomicidadInvalido`, `TestCreatePacientesBatchJSONInvalido` y `TestCreatePacientesBatchRutaRegistrada`.
 
-### 6.13 Dificultades acumuladas y decisiones de diseño
+### 6.13 Feature: Extensión de Dominio con Altura y cálculo de IMC (v1.0.11)
+
+- Se incorporó el campo `Altura float64` (`json:"altura,omitempty"`) al modelo de dominio `models.Paciente`.
+- Se implementaron validaciones de rango clínico `alturaMinima = 0.30` y `alturaMaxima = 2.50` metros en `validarPaciente` y `PatchPaciente`. Si `Altura != 0`, se exige que cumpla dicho rango, rechazando con 400 Bad Request si está fuera.
+- Se amplió `ordenarPacientes` para permitir `sort=altura` ascendente y descendente.
+- Handler `GetPacienteIMC`: calcula el IMC ($peso / altura^2$) redondeado a 2 decimales y devuelve la clasificación OMS (`Bajo peso`, `Normal`, `Sobrepeso`, `Obesidad`). Falla con 404 si el ID no existe o 400 si el paciente no tiene altura registrada (`<= 0`) o peso válido (`<= 0`).
+- Registro dual en `SetupRoutes`: accesible vía `/pacientes/imc/{id}` y `/pacientes/{id}/imc`. Se corrigió además la sintaxis en el router registrando con `:id` y `:edad` para garantizar la resolución en llamadas HTTP reales.
+- Tests agregados: `TestPacienteJSONSerializacionConAltura`, `TestGetPacienteIMCOK`, `TestGetPacienteIMCRutasRegistradas`, `TestGetPacienteIMCNoEncontrado`, `TestGetPacienteIMCSinAltura`, `TestGetPacienteIMCClasificaciones`, `TestCreatePacienteAlturaValida`, `TestCreatePacienteAlturaFueraDeRango`, `TestPatchPacienteAltura`, `TestPatchPacienteAlturaInvalida`.
+
+### 6.14 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
 3. **`MockPacienteRepository.Create` sin ID**: el mock original no asignaba `ID` cuando venía vacío, impidiendo probar `GetByID`, `Update` o `Delete` sobre pacientes recién creados. Se incorporó el contador atómico `nextID` (`paciente-<n>`).
 4. **Receptor de interfaz por valor vs puntero**: los handlers reciben `firestore.PacienteRepository` por valor (un puntero a interfaz `*firestore.PacienteRepository` no expone los métodos de la interfaz).
-5. **Límites clínicos y formato de tipos**: se acotó `edad` a `1–120`, `peso` a `>0 y <=500` y `porcentaje_grasa` a `0–100`. Las constantes enteras usan `%d` en `fmt.Errorf`/`fmt.Sprintf` para pasar `go vet`.
-6. **Prioridad de rutas en Echo v4**: `/pacientes/search`, `/pacientes/stats`, `/pacientes/count`, `/pacientes/export` y `/pacientes/edad/{edad}` se registran en `SetupRoutes` antes que `/pacientes/{id}` para priorizar los segmentos estáticos frente al parámetro `{id}`.
+5. **Límites clínicos y formato de tipos**: se acotó `edad` a `1–120`, `peso` a `>0 y <=500`, `porcentaje_grasa` a `0–100` y `altura` a `0.30–2.50`. Las constantes enteras usan `%d` y flotantes `%.2f` en `fmt.Errorf`/`fmt.Sprintf` para pasar `go vet`.
+6. **Prioridad de rutas en Echo v4**: `/pacientes/search`, `/pacientes/stats`, `/pacientes/count`, `/pacientes/export`, `/pacientes/edad/{edad}` y `/pacientes/imc/{id}` se registran en `SetupRoutes` antes que `/pacientes/{id}` para priorizar los segmentos estáticos frente al parámetro `{id}`.
 7. **Simetría de invariantes en `PATCH` parcial**: como `PATCH` deserializa en `map[string]any` para no pisar campos omitidos, no puede invocar `validarPaciente` antes de fusionar cambios. Por eso aplica `normalizarNombre` y las cotas de rango campo por campo sobre los valores presentes antes de llamar a `repo.Update`.
 8. **Recuperación de `PROJECT_INDEX.md` y separación de commits por unidad de trabajo**: ante un reemplazo accidental que había borrado las secciones `1` a `6.7` del índice en el working tree, se restauró desde `HEAD` en un commit documental independiente (`a0ad130`) antes de aplicar los cambios de código y tests (`0fd27a6`).
 9. **Inspección de adaptador en `HealthCheck` sin acoplar `PacienteRepository`**: `HealthCheck` usa `_, isMock := repo.(*firestore.MockPacienteRepository)` para informar `"storage": "mock"|"firestore"` sin añadir métodos de infraestructura a la interfaz de dominio/puerto.
-10. **Elección de `GET /pacientes/count` acorde al modelo de dominio**: dado que `models.Paciente` no incluye `Altura`, se descartó calcular IMC y se implementó `GET /pacientes/count` sobre `repo.GetAll(ctx, 0, 0)`, respetando la estructura de datos existente.
+10. **Elección de `GET /pacientes/count` acorde al modelo de dominio**: dado que inicialmente `models.Paciente` no incluía `Altura`, se postergó el cálculo de IMC hasta v1.0.11 donde se incorporó el campo de forma retrocompatible.
 11. **Verificación contra el seed real del mock en tests table-driven**: en la primera corrida de `TestSearchPacientesFiltrarPorPorcentajeGrasaMinMax` se detectó que en `NewMockPacienteRepository()` `Juan Perez` tiene `18.5%` de grasa y `Maria Gomez` tiene `22.0%` (al revés de lo supuesto inicialmente), ajustándose las aserciones al estado real del seed.
 12. **Colisión estática vs paramétrica en `/pacientes/export` y test de integración router-level**: para asegurar que `GET /pacientes/export` no fuera capturado por `/pacientes/{id}` con `{id} = "export"`, se registró antes y se cubrió con `TestExportPacientesCSVRutaRegistrada` usando `e.ServeHTTP`. Además, se utilizó `encoding/csv.NewWriter` para respetar RFC 4180 y formateo decimal con `strconv.FormatFloat(val, 'f', -1, 64)`.
 13. **Diagnóstico de configuración en relay de revisión RDD**: el proceso de revisión nativa identificó falta de modelo para la clave `review-readability` en la configuración global de Gentle AI (`models.json`). Bajo el contrato RDD, el fallo en transporte de lentes externas queda documentado como blocker de configuración y no afecta los contratos de compilación, tests locales ni entrega ordinaria de Git.
 14. **Atomicidad de validación en operaciones batch y firma de `Create`**: para prevenir estados parciales o registros huérfanos sin necesidad de transacciones complejas distribuidas a nivel de base de datos, se aplicó un ciclo de validación estricto en dos fases (validar todo antes de persistir). Además, dado que `repo.Create` devuelve `*models.Paciente`, el acumulador de respuesta tipa con `[]*models.Paciente` para devolver limpiamente el slice serializado en JSON.
+15. **Sintaxis de parámetros en el router de Echo v4 (`:id` vs `{id}`) y compatibilidad hacia atrás en `models.Paciente`**: Echo v4 espera parámetros de ruta con la sintaxis de dos puntos (`:id`, `:edad`), mientras que `{id}` era interpretado como literal estático por el motor radix cuando se pasaban peticiones HTTP completas a `e.ServeHTTP`. Se normalizó `SetupRoutes` registrando ambas sintaxis para máxima compatibilidad con tests unitarios y clientes HTTP reales. Por otro lado, la adición de `Altura` con `json:"altura,omitempty"` garantizó que toda la suite previa y registros sin altura sigan funcionando sin requerir migraciones de datos ni romper clientes existentes.
 
 ## 7. Convenciones de entrega
 
