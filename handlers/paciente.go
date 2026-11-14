@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -70,6 +71,13 @@ func ordenarPacientes(pacientes []models.Paciente, sortCampo, orden string) {
 				return pacientes[i].PorcentajeGrasa > pacientes[j].PorcentajeGrasa
 			}
 			return pacientes[i].PorcentajeGrasa < pacientes[j].PorcentajeGrasa
+		})
+	case "altura":
+		sort.SliceStable(pacientes, func(i, j int) bool {
+			if desc {
+				return pacientes[i].Altura > pacientes[j].Altura
+			}
+			return pacientes[i].Altura < pacientes[j].Altura
 		})
 	}
 }
@@ -245,6 +253,8 @@ const (
 	edadMaxima            = 120
 	pesoMaximo            = 500
 	porcentajeGrasaMaximo = 100
+	alturaMinima          = 0.30
+	alturaMaxima          = 2.50
 )
 
 // normalizarNombre limpia espacios sobrantes y deja cada palabra con primera letra mayúscula.
@@ -274,6 +284,9 @@ func validarPaciente(p models.Paciente) error {
 	}
 	if p.PorcentajeGrasa < 0 || p.PorcentajeGrasa > porcentajeGrasaMaximo {
 		return fmt.Errorf("El campo 'porcentaje_grasa' debe estar entre 0 y %d", porcentajeGrasaMaximo)
+	}
+	if p.Altura != 0 && (p.Altura < alturaMinima || p.Altura > alturaMaxima) {
+		return fmt.Errorf("El campo 'altura' debe estar entre %.2f y %.2f metros", alturaMinima, alturaMaxima)
 	}
 	return nil
 }
@@ -412,6 +425,14 @@ func PatchPaciente(c echo.Context, repo firestore.PacienteRepository) error {
 			existente.PorcentajeGrasa = g
 		}
 	}
+	if altura, ok := cambios["altura"]; ok {
+		if a, ok := altura.(float64); ok {
+			if a < alturaMinima || a > alturaMaxima {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'altura' debe estar entre %.2f y %.2f metros", alturaMinima, alturaMaxima)})
+			}
+			existente.Altura = a
+		}
+	}
 	if notas, ok := cambios["notas"]; ok {
 		existente.Notas = notas.(string)
 	}
@@ -445,6 +466,68 @@ func GetPacientesPorEdad(c echo.Context, repo firestore.PacienteRepository) erro
 		}
 	}
 	return c.JSON(http.StatusOK, filtrados)
+}
+
+// RespuestaIMC estructura los datos calculados de IMC y su categorización clínica según la OMS.
+type RespuestaIMC struct {
+	ID            string  `json:"id"`
+	Nombre        string  `json:"nombre"`
+	Peso          float64 `json:"peso"`
+	Altura        float64 `json:"altura"`
+	IMC           float64 `json:"imc"`
+	Clasificacion string  `json:"clasificacion"`
+}
+
+// clasificarIMC categoriza el IMC según las pautas estándar de la OMS.
+func clasificarIMC(imc float64) string {
+	switch {
+	case imc < 18.5:
+		return "Bajo peso"
+	case imc < 25.0:
+		return "Normal"
+	case imc < 30.0:
+		return "Sobrepeso"
+	default:
+		return "Obesidad"
+	}
+}
+
+// GetPacienteIMC calcula y devuelve el Índice de Masa Corporal (IMC) y su clasificación OMS.
+// Retorna 404 si el paciente no existe, o 400 si el paciente no tiene altura registrada (<= 0) o peso válido.
+func GetPacienteIMC(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+	}
+
+	paciente, err := repo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+
+	if paciente.Altura <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "El paciente no tiene altura registrada para calcular el IMC",
+		})
+	}
+
+	if paciente.Peso <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "El paciente no tiene un peso válido para calcular el IMC",
+		})
+	}
+
+	imc := paciente.Peso / (paciente.Altura * paciente.Altura)
+	imc = math.Round(imc*100) / 100
+
+	return c.JSON(http.StatusOK, RespuestaIMC{
+		ID:            paciente.ID,
+		Nombre:        paciente.Nombre,
+		Peso:          paciente.Peso,
+		Altura:        paciente.Altura,
+		IMC:           imc,
+		Clasificacion: clasificarIMC(imc),
+	})
 }
 
 // GetPacienteByID obtiene un paciente por su ID.
@@ -559,17 +642,44 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	e.GET("/pacientes/export", func(c echo.Context) error {
 		return ExportPacientesCSV(c, repo)
 	})
+	e.GET("/pacientes/edad/:edad", func(c echo.Context) error {
+		return GetPacientesPorEdad(c, repo)
+	})
 	e.GET("/pacientes/edad/{edad}", func(c echo.Context) error {
 		return GetPacientesPorEdad(c, repo)
+	})
+	e.GET("/pacientes/imc/:id", func(c echo.Context) error {
+		return GetPacienteIMC(c, repo)
+	})
+	e.GET("/pacientes/imc/{id}", func(c echo.Context) error {
+		return GetPacienteIMC(c, repo)
+	})
+	e.GET("/pacientes/:id/imc", func(c echo.Context) error {
+		return GetPacienteIMC(c, repo)
+	})
+	e.GET("/pacientes/{id}/imc", func(c echo.Context) error {
+		return GetPacienteIMC(c, repo)
+	})
+	e.GET("/pacientes/:id", func(c echo.Context) error {
+		return GetPacienteByID(c, repo)
 	})
 	e.GET("/pacientes/{id}", func(c echo.Context) error {
 		return GetPacienteByID(c, repo)
 	})
+	e.PUT("/pacientes/:id", func(c echo.Context) error {
+		return UpdatePaciente(c, repo)
+	})
 	e.PUT("/pacientes/{id}", func(c echo.Context) error {
 		return UpdatePaciente(c, repo)
 	})
+	e.PATCH("/pacientes/:id", func(c echo.Context) error {
+		return PatchPaciente(c, repo)
+	})
 	e.PATCH("/pacientes/{id}", func(c echo.Context) error {
 		return PatchPaciente(c, repo)
+	})
+	e.DELETE("/pacientes/:id", func(c echo.Context) error {
+		return DeletePaciente(c, repo)
 	})
 	e.DELETE("/pacientes/{id}", func(c echo.Context) error {
 		return DeletePaciente(c, repo)

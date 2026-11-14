@@ -1490,3 +1490,280 @@ func TestCreatePacientesBatchRutaRegistrada(t *testing.T) {
 
 	assert.Equal(t, http.StatusCreated, rec.Code)
 }
+
+// TestGetPacienteIMCOK verifica el cálculo exitoso de IMC para un paciente con peso y altura válidos.
+func TestGetPacienteIMCOK(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	creado, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Lucas Silva",
+		Edad:   28,
+		Peso:   75.5,
+		Altura: 1.75,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/imc/"+creado.ID, nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", creado.ID)
+
+	err = GetPacienteIMC(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var resp map[string]any
+	body := c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()
+	err = json.Unmarshal(body, &resp)
+	require.NoError(t, err)
+
+	assert.Equal(t, creado.ID, resp["id"])
+	assert.Equal(t, "Lucas Silva", resp["nombre"])
+	assert.Equal(t, 75.5, resp["peso"])
+	assert.Equal(t, 1.75, resp["altura"])
+	assert.Equal(t, 24.65, resp["imc"])
+	assert.Equal(t, "Normal", resp["clasificacion"])
+}
+
+// TestGetPacienteIMCRutasRegistradas verifica que el router soporte tanto /pacientes/imc/{id} como /pacientes/{id}/imc.
+func TestGetPacienteIMCRutasRegistradas(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	creado, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Elena Rossi",
+		Edad:   32,
+		Peso:   60.0,
+		Altura: 1.65,
+	})
+	require.NoError(t, err)
+
+	// Probar ruta 1: /pacientes/imc/{id}
+	req1 := httptest.NewRequest(http.MethodGet, "/pacientes/imc/"+creado.ID, nil)
+	rec1 := httptest.NewRecorder()
+	e.ServeHTTP(rec1, req1)
+	assert.Equal(t, http.StatusOK, rec1.Code)
+
+	// Probar ruta 2: /pacientes/{id}/imc
+	req2 := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/imc", nil)
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req2)
+	assert.Equal(t, http.StatusOK, rec2.Code)
+}
+
+// TestGetPacienteIMCNoEncontrado verifica error 404 para ID inexistente.
+func TestGetPacienteIMCNoEncontrado(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/imc/paciente-inexistente", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", "paciente-inexistente")
+
+	err := GetPacienteIMC(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, c.Response().Status)
+}
+
+// TestGetPacienteIMCSinAltura verifica error 400 cuando el paciente no tiene altura registrada (altura <= 0).
+func TestGetPacienteIMCSinAltura(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	creado, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Marcos Sin Altura",
+		Edad:   40,
+		Peso:   80.0,
+		Altura: 0,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/imc/"+creado.ID, nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", creado.ID)
+
+	err = GetPacienteIMC(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+	assert.Contains(t, c.Response().Writer.(*httptest.ResponseRecorder).Body.String(), "altura")
+}
+
+// TestGetPacienteIMCClasificaciones verifica table-driven las clasificaciones OMS según el IMC resultante.
+func TestGetPacienteIMCClasificaciones(t *testing.T) {
+	casos := []struct {
+		name                 string
+		peso                 float64
+		altura               float64
+		expectedIMC          float64
+		expectedClasificacion string
+	}{
+		{
+			name:                 "Bajo peso (IMC < 18.5)",
+			peso:                 50.0,
+			altura:               1.75,
+			expectedIMC:          16.33,
+			expectedClasificacion: "Bajo peso",
+		},
+		{
+			name:                 "Normal (18.5 <= IMC < 25.0)",
+			peso:                 70.0,
+			altura:               1.75,
+			expectedIMC:          22.86,
+			expectedClasificacion: "Normal",
+		},
+		{
+			name:                 "Sobrepeso (25.0 <= IMC < 30.0)",
+			peso:                 85.0,
+			altura:               1.75,
+			expectedIMC:          27.76,
+			expectedClasificacion: "Sobrepeso",
+		},
+		{
+			name:                 "Obesidad (IMC >= 30.0)",
+			peso:                 100.0,
+			altura:               1.75,
+			expectedIMC:          32.65,
+			expectedClasificacion: "Obesidad",
+		},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTestEcho()
+			repo := firestore.NewMockPacienteRepository()
+			creado, err := repo.Create(context.Background(), models.Paciente{
+				Nombre: "Test IMC",
+				Edad:   30,
+				Peso:   tc.peso,
+				Altura: tc.altura,
+			})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodGet, "/pacientes/imc/"+creado.ID, nil)
+			c := e.NewContext(req, httptest.NewRecorder())
+			setParam(c, "id", creado.ID)
+
+			err = GetPacienteIMC(c, repo)
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, c.Response().Status)
+
+			var resp map[string]any
+			body := c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()
+			err = json.Unmarshal(body, &resp)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.expectedIMC, resp["imc"])
+			assert.Equal(t, tc.expectedClasificacion, resp["clasificacion"])
+		})
+	}
+}
+
+// TestCreatePacienteAlturaValida verifica que se pueda crear un paciente informando su altura.
+func TestCreatePacienteAlturaValida(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	payload := `{"nombre":"Martin Palermo","edad":45,"peso":85.0,"altura":1.87,"porcentaje_grasa":18.0}`
+	req := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	err := CreatePaciente(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, c.Response().Status)
+
+	var creado models.Paciente
+	body := c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()
+	err = json.Unmarshal(body, &creado)
+	require.NoError(t, err)
+	assert.Equal(t, 1.87, creado.Altura)
+}
+
+// TestCreatePacienteAlturaFueraDeRango verifica rechazo 400 cuando la altura enviada excede los límites (0.30 a 2.50 m) o es negativa.
+func TestCreatePacienteAlturaFueraDeRango(t *testing.T) {
+	casos := []struct {
+		name    string
+		payload string
+	}{
+		{
+			name:    "altura menor a 0.30 m",
+			payload: `{"nombre":"Test Altura Baja","edad":30,"peso":70.0,"altura":0.25,"porcentaje_grasa":20.0}`,
+		},
+		{
+			name:    "altura mayor a 2.50 m",
+			payload: `{"nombre":"Test Altura Gigante","edad":30,"peso":70.0,"altura":2.80,"porcentaje_grasa":20.0}`,
+		},
+		{
+			name:    "altura negativa",
+			payload: `{"nombre":"Test Altura Negativa","edad":30,"peso":70.0,"altura":-1.75,"porcentaje_grasa":20.0}`,
+		},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTestEcho()
+			repo := firestore.NewMockPacienteRepository()
+			req := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(tc.payload))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			c := e.NewContext(req, httptest.NewRecorder())
+
+			err := CreatePaciente(c, repo)
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+			assert.Contains(t, c.Response().Writer.(*httptest.ResponseRecorder).Body.String(), "altura")
+		})
+	}
+}
+
+// TestPatchPacienteAltura verifica la actualización parcial del campo altura.
+func TestPatchPacienteAltura(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	creado, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Paciente Para Patch Altura",
+		Edad:   29,
+		Peso:   72.0,
+	})
+	require.NoError(t, err)
+
+	payload := `{"altura": 1.74}`
+	req := httptest.NewRequest(http.MethodPatch, "/pacientes/"+creado.ID, strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", creado.ID)
+
+	err = PatchPaciente(c, repo)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var resp models.Paciente
+	body := c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()
+	err = json.Unmarshal(body, &resp)
+	require.NoError(t, err)
+	assert.Equal(t, 1.74, resp.Altura)
+}
+
+// TestPatchPacienteAlturaInvalida verifica rechazo 400 al intentar patchear una altura fuera de rango.
+func TestPatchPacienteAlturaInvalida(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+	creado, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Paciente Para Patch Invalido",
+		Edad:   29,
+		Peso:   72.0,
+	})
+	require.NoError(t, err)
+
+	payload := `{"altura": 3.10}`
+	req := httptest.NewRequest(http.MethodPatch, "/pacientes/"+creado.ID, strings.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	setParam(c, "id", creado.ID)
+
+	err = PatchPaciente(c, repo)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
+	assert.Contains(t, c.Response().Writer.(*httptest.ResponseRecorder).Body.String(), "altura")
+}

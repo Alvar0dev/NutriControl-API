@@ -67,6 +67,7 @@ func (m *MockPacienteRepository) Update(ctx context.Context, id string, p models
 			m.store[i].Nombre = p.Nombre
 			m.store[i].Edad = p.Edad
 			m.store[i].Peso = p.Peso
+			m.store[i].Altura = p.Altura
 			m.store[i].PorcentajeGrasa = p.PorcentajeGrasa
 			m.store[i].Notas = p.Notas
 			return &m.store[i], nil
