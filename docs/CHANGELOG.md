@@ -1,5 +1,34 @@
 # CHANGELOG.md
 
+## Versión 1.0.12 - 2026-11-16
+
+### Endpoint `GET /pacientes/reporte` (Analítica demográfica y nutricional de la población)
+
+- **Estructuras de respuesta en `handlers/paciente.go`**:
+  - `GruposEtarios`: desglosa la población en `menores` (`Edad < 18`), `adultos` (`18 <= Edad <= 65`) y `mayores` (`Edad > 65`).
+  - `ClasificacionIMCPoblacion`: contabiliza pacientes por categoría OMS (`bajo_peso`, `normal`, `sobrepeso`, `obesidad`) más `sin_datos` para pacientes sin altura o peso válido registrado.
+  - `PromediosReporte`: promedios poblacionales de `edad`, `peso`, `porcentaje_grasa` e `imc` redondeados a 2 decimales (`math.Round(val*100)/100`).
+  - `RespuestaReporte`: estructura contenedora con `total`, `grupos_etarios`, `clasificacion_imc` y `promedios`.
+- **Handler `ReportePacientes` (`GET /pacientes/reporte`)**:
+  - Consulta el universo completo de pacientes mediante `repo.GetAll(c.Request().Context(), 0, 0)`.
+  - Reutiliza `clasificarIMC` sobre el IMC redondeado a 2 decimales cuando el paciente posee `Altura > 0` y `Peso > 0`; en caso contrario contabiliza el registro en `sin_datos`.
+  - Si el repositorio está vacío (`total == 0`), devuelve `200 OK` con todos los contadores y promedios en `0`.
+- **Registro en `SetupRoutes`**: ruta estática `GET /pacientes/reporte` ubicada junto a `/pacientes/stats` y antes de `/pacientes/:id` y `/pacientes/{id}`.
+- **Tests agregados en `handlers/paciente_test.go` (3 nuevos, 72 ejecuciones `--- PASS:` incluyendo subtests)**:
+  - `TestReportePacientesOK`: verifica el conteo exacto en las 3 franjas etarias, las 4 categorías OMS más `sin_datos` (pacientes del seed sin altura) y los 4 promedios redondeados a 2 decimales.
+  - `TestReportePacientesVacio`: verifica respuesta `200 OK` con todos los contadores y promedios en `0` sobre repositorio vacío.
+  - `TestReportePacientesRutaRegistrada`: verifica a través de `e.ServeHTTP` que `/pacientes/reporte` se resuelva en el router de Echo antes de `/pacientes/:id`.
+- `go test -count=1 ./...`, `go vet ./...`, `go build ./...` todos verdes.
+- Commit: `79d9c53 feat: endpoint GET /pacientes/reporte para analítica poblacional`.
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Contabilidad poblacional exacta ante pacientes sin altura (`sin_datos` en `ClasificacionIMCPoblacion`).** Dado que `Altura` se definió como opcional (`json:"altura,omitempty"`) en v1.0.11 para preservar retrocompatibilidad con registros históricos y con el seed inicial de `MockPacienteRepository` (`Juan Perez` y `Maria Gomez` tienen `Altura: 0`), una parte del padrón puede carecer de altura. Si simplemente se omitieran del bloque `clasificacion_imc`, la suma de categorías nutricionales no coincidiría con `total`. Por eso se incorporó el campo explícito `sin_datos`, preservando el invariante `bajo_peso + normal + sobrepeso + obesidad + sin_datos == total`, y el promedio `promedios.imc` se divide únicamente entre los pacientes con IMC calculable (`conIMC > 0`) para no distorsionar la media clínica con ceros ni dividir por cero cuando ningún paciente tiene altura.
+2. **Consulta del padrón completo (`repo.GetAll(ctx, 0, 0)`) frente a la paginación por defecto.** A diferencia de `GetPacientes` o `SearchPacientes` que aplican `paginacionDesdeQuery` (`limit = 10` por defecto), un reporte analítico demográfico y nutricional debe reflejar el estado global de la población registrada y no solo la primera página. Por ello `ReportePacientes` invoca `repo.GetAll(c.Request().Context(), 0, 0)`, manteniendo el mismo criterio que `CountPacientes` y `ExportPacientesCSV`.
+3. **Consistencia clínica entre el cálculo individual (`GetPacienteIMC`) y el reporte agregado (`ReportePacientes`).** En lugar de reescribir umbrales de comparación en el reporte, se calcula el IMC individual redondeado primero a 2 decimales (`math.Round((p.Peso/(p.Altura*p.Altura))*100) / 100`) y luego se invoca la función existente `clasificarIMC(imc)`. Esto evita discrepancias de punto flotante en valores límite (como `24.999`) y garantiza que la categoría de un paciente en `GET /pacientes/imc/:id` sea idéntica a la que suma en `GET /pacientes/reporte`.
+4. **Precedencia de la ruta estática `/pacientes/reporte` en Echo v4.** Siguiendo la convención de rutas estáticas del proyecto, `/pacientes/reporte` se registró en `SetupRoutes` antes de `/pacientes/:id` y `/pacientes/{id}`, y se validó con `TestReportePacientesRutaRegistrada` mediante `e.ServeHTTP` para asegurar que el router no interprete `"reporte"` como un identificador de paciente.
+
+---
 ## Versión 1.0.11 - 2026-11-14
 
 ### Extensión de Dominio con `Altura` y endpoints de cálculo de IMC (`GET /pacientes/imc/{id}` y `GET /pacientes/{id}/imc`)

@@ -42,6 +42,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T21 | S1 | inline | done | `05a97f8` feat: ordenamiento dinámico en pacientes y endpoint GET /pacientes/export (CSV) |
 | T22 | S1 | inline | done | `00e49ce` feat: endpoint POST /pacientes/batch para alta masiva validada |
 | T23 | S1 | inline | done | `d413d02` feat: extensión de dominio con Altura y endpoints de cálculo de IMC |
+| T24 | S1 | inline | done | `79d9c53` feat: endpoint GET /pacientes/reporte para analítica poblacional |
 
 ## Log
 
@@ -129,5 +130,18 @@ L20: [usuario] "Guarda todo el proceso en la documentacion con todas las dificul
 L20: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.11 (compatibilidad hacia atrás con omitempty en Altura, sintaxis nativa de router Echo v4 :id vs {id}, ruta dual semántica /pacientes/imc/:id y sub-recurso /pacientes/:id/imc, y validación condicional de altura) en docs/CHANGELOG.md, PROJECT_INDEX.md (6.13 y dificultad 15), AGENTS.md, odd/task/estado-actual-proyecto.md y todo.
 - Commiteado y pusheado a origin/main.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: Endpoint GET /pacientes/reporte; Opción 2: Configuración host RDD).
+
+L21: [usuario] "haz el todo 1" (Endpoint GET /pacientes/reporte analítica poblacional)
+L21: [asistente] Implementado test-first el endpoint `GET /pacientes/reporte` (`ReportePacientes`, v1.0.12):
+- Estructuras `RespuestaReporte`, `GruposEtarios` (`menores` <18, `adultos` 18–65, `mayores` >65), `ClasificacionIMCPoblacion` (`bajo_peso`, `normal`, `sobrepeso`, `obesidad`, `sin_datos`) y `PromediosReporte` (`edad`, `peso`, `porcentaje_grasa`, `imc` redondeados a 2 decimales).
+- Consulta del padrón completo con `repo.GetAll(ctx, 0, 0)`, reutilización de `clasificarIMC` y cálculo de promedio de IMC únicamente sobre pacientes con altura y peso válidos (`conIMC > 0`), contabilizando en `sin_datos` los registros sin altura.
+- Ruta estática `GET /pacientes/reporte` registrada en `SetupRoutes` antes de `/pacientes/:id` y `/pacientes/{id}`.
+- 3 tests nuevos agregados en `handlers/paciente_test.go`: `TestReportePacientesOK`, `TestReportePacientesVacio` y `TestReportePacientesRutaRegistrada`.
+- `go test -count=1 ./...`, `go vet ./...` y `go build ./...` todos verdes. Commit `79d9c53`.
+
+L22: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L22: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.12 (invariante contable con `sin_datos` para pacientes sin altura, promedio condicional de IMC sobre `conIMC > 0`, consulta del padrón completo con `GetAll(ctx, 0, 0)`, reutilización de `clasificarIMC` con redondeo previo a 2 decimales y precedencia de ruta estática `/pacientes/reporte` en Echo v4) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (3.2, 6.14 y dificultad 16), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Commiteado y pusheado a `origin/main`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: Soft delete en pacientes; Opción 2: Historial de seguimiento clínico por paciente; Opción 3: Configuración host RDD).
 
 

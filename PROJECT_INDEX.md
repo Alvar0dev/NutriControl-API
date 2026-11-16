@@ -73,6 +73,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | DELETE | `/pacientes/{id}` | DeletePaciente | Delete | 204 No Content / 404 |
 | GET | `/pacientes/search` | SearchPacientes | GetAll(ctx, limit, offset) + filtro en memoria | 200 OK `[Paciente]` paginado |
 | GET | `/pacientes/stats` | StatsPacientes | GetAll(ctx, limit, offset) + agregación en memoria | 200 OK `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` |
+| GET | `/pacientes/reporte` | ReportePacientes | GetAll(ctx, 0, 0) + agregación demográfica y nutricional | 200 OK `RespuestaReporte` `{total, grupos_etarios, clasificacion_imc, promedios}` |
 | GET | `/pacientes/count` | CountPacientes | GetAll(ctx, 0, 0) | 200 OK `{"total": <n>}` |
 | GET | `/pacientes/export` | ExportPacientesCSV | GetAll(ctx, 0, 0) | 200 OK `text/csv` (`attachment; filename="pacientes.csv"`) |
 | GET | `/pacientes/edad/{edad}` | GetPacientesPorEdad | GetAll(ctx, 0, 0) + filtro en memoria por edad exacta | 200 OK `[Paciente]` (vacío si no hay coincidencia) / 400 si edad no numérica |
@@ -154,7 +155,7 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` por ID), `GET /health`, cálculo de IMC (`GET /pacientes/imc/{id}` y `/pacientes/{id}/imc`), filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100, `altura` 0.30-2.50m) y normalización de nombres. |
+| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` por ID), `GET /health`, cálculo de IMC (`GET /pacientes/imc/{id}` y `/pacientes/{id}/imc`), reporte analítico (`GET /pacientes/reporte`), alta masiva (`POST /pacientes/batch`), filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100, `altura` 0.30-2.50m) y normalización de nombres. |
 | Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). |
 | Build | `go build ./...` y `go vet ./...` OK. |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
@@ -261,7 +262,18 @@ go vet ./...                     # Verificación estándar
 - Registro dual en `SetupRoutes`: accesible vía `/pacientes/imc/{id}` y `/pacientes/{id}/imc`. Se corrigió además la sintaxis en el router registrando con `:id` y `:edad` para garantizar la resolución en llamadas HTTP reales.
 - Tests agregados: `TestPacienteJSONSerializacionConAltura`, `TestGetPacienteIMCOK`, `TestGetPacienteIMCRutasRegistradas`, `TestGetPacienteIMCNoEncontrado`, `TestGetPacienteIMCSinAltura`, `TestGetPacienteIMCClasificaciones`, `TestCreatePacienteAlturaValida`, `TestCreatePacienteAlturaFueraDeRango`, `TestPatchPacienteAltura`, `TestPatchPacienteAlturaInvalida`.
 
-### 6.14 Dificultades acumuladas y decisiones de diseño
+### 6.14 Feature: Endpoint analítico `GET /pacientes/reporte` (v1.0.12)
+
+- Handler `ReportePacientes` (`GET /pacientes/reporte`): consulta el padrón completo mediante `repo.GetAll(ctx, 0, 0)` y devuelve `RespuestaReporte` con:
+  - `total`: cantidad total de pacientes registrados.
+  - `grupos_etarios` (`GruposEtarios`): distribución demográfica en `menores` (`< 18`), `adultos` (`18–65`) y `mayores` (`> 65`).
+  - `clasificacion_imc` (`ClasificacionIMCPoblacion`): distribución nutricional según la OMS reutilizando `clasificarIMC` (`bajo_peso`, `normal`, `sobrepeso`, `obesidad`) y `sin_datos` para pacientes sin altura o peso válido.
+  - `promedios` (`PromediosReporte`): promedios redondeados a 2 decimales de `edad`, `peso`, `porcentaje_grasa` e `imc` (este último calculado solo sobre los pacientes con `Altura > 0` y `Peso > 0`).
+- Ruta `GET /pacientes/reporte` registrada en `SetupRoutes` antes de `/pacientes/:id` y `/pacientes/{id}`.
+- Tests: `TestReportePacientesOK`, `TestReportePacientesVacio` y `TestReportePacientesRutaRegistrada`.
+- Commit: `79d9c53 feat: endpoint GET /pacientes/reporte para analítica poblacional`.
+
+### 6.15 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -278,6 +290,7 @@ go vet ./...                     # Verificación estándar
 13. **Diagnóstico de configuración en relay de revisión RDD**: el proceso de revisión nativa identificó falta de modelo para la clave `review-readability` en la configuración global de Gentle AI (`models.json`). Bajo el contrato RDD, el fallo en transporte de lentes externas queda documentado como blocker de configuración y no afecta los contratos de compilación, tests locales ni entrega ordinaria de Git.
 14. **Atomicidad de validación en operaciones batch y firma de `Create`**: para prevenir estados parciales o registros huérfanos sin necesidad de transacciones complejas distribuidas a nivel de base de datos, se aplicó un ciclo de validación estricto en dos fases (validar todo antes de persistir). Además, dado que `repo.Create` devuelve `*models.Paciente`, el acumulador de respuesta tipa con `[]*models.Paciente` para devolver limpiamente el slice serializado en JSON.
 15. **Sintaxis de parámetros en el router de Echo v4 (`:id` vs `{id}`) y compatibilidad hacia atrás en `models.Paciente`**: Echo v4 espera parámetros de ruta con la sintaxis de dos puntos (`:id`, `:edad`), mientras que `{id}` era interpretado como literal estático por el motor radix cuando se pasaban peticiones HTTP completas a `e.ServeHTTP`. Se normalizó `SetupRoutes` registrando ambas sintaxis para máxima compatibilidad con tests unitarios y clientes HTTP reales. Por otro lado, la adición de `Altura` con `json:"altura,omitempty"` garantizó que toda la suite previa y registros sin altura sigan funcionando sin requerir migraciones de datos ni romper clientes existentes.
+16. **Invariante contable con `sin_datos` y promedio condicional de IMC en `GET /pacientes/reporte`**: dado que `Altura` es opcional (`omitempty`), los registros previos sin altura (como los 2 pacientes del seed del mock) no permiten calcular el IMC. En `ReportePacientes` se agregó el contador explícito `sin_datos` dentro de `clasificacion_imc` para que la suma de categorías coincida siempre con `total`, y `promedios.imc` se divide exclusivamente entre los pacientes con IMC válido (`conIMC > 0`), reutilizando `clasificarIMC` tras redondear a 2 decimales para mantener consistencia exacta con `GET /pacientes/imc/:id`.
 
 ## 7. Convenciones de entrega
 
