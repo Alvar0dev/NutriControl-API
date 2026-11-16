@@ -1767,3 +1767,91 @@ func TestPatchPacienteAlturaInvalida(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, c.Response().Status)
 	assert.Contains(t, c.Response().Writer.(*httptest.ResponseRecorder).Body.String(), "altura")
 }
+
+// TestReportePacientesOK verifica la generación del reporte analítico con todos los rangos etarios y categorías OMS de IMC.
+func TestReportePacientesOK(t *testing.T) {
+	e := newTestEcho()
+	repo := firestore.NewMockPacienteRepository()
+
+	extras := []models.Paciente{
+		{Nombre: "Menor Bajo Peso", Edad: 15, Peso: 45.0, Altura: 1.70, PorcentajeGrasa: 12.0},
+		{Nombre: "Adulto Normal", Edad: 35, Peso: 70.0, Altura: 1.75, PorcentajeGrasa: 20.0},
+		{Nombre: "Adulto Sobrepeso", Edad: 50, Peso: 85.0, Altura: 1.75, PorcentajeGrasa: 26.0},
+		{Nombre: "Mayor Obesidad", Edad: 70, Peso: 100.0, Altura: 1.75, PorcentajeGrasa: 32.0},
+	}
+	for _, p := range extras {
+		_, err := repo.Create(context.Background(), p)
+		require.NoError(t, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/reporte", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	err := ReportePacientes(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var resp RespuestaReporte
+	body := c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()
+	err = json.Unmarshal(body, &resp)
+	require.NoError(t, err)
+
+	assert.Equal(t, 6, resp.Total)
+	assert.Equal(t, 1, resp.GruposEtarios.Menores)
+	assert.Equal(t, 4, resp.GruposEtarios.Adultos)
+	assert.Equal(t, 1, resp.GruposEtarios.Mayores)
+
+	assert.Equal(t, 1, resp.ClasificacionIMC.BajoPeso)
+	assert.Equal(t, 1, resp.ClasificacionIMC.Normal)
+	assert.Equal(t, 1, resp.ClasificacionIMC.Sobrepeso)
+	assert.Equal(t, 1, resp.ClasificacionIMC.Obesidad)
+	assert.Equal(t, 2, resp.ClasificacionIMC.SinDatos)
+
+	assert.Equal(t, 37.5, resp.Promedios.Edad)
+	assert.Equal(t, 72.92, resp.Promedios.Peso)
+	assert.Equal(t, 21.75, resp.Promedios.PorcentajeGrasa)
+	assert.Equal(t, 24.71, resp.Promedios.IMC)
+}
+
+// TestReportePacientesVacio verifica que un repositorio vacío retorne todos los contadores y promedios en 0.
+func TestReportePacientesVacio(t *testing.T) {
+	e := newTestEcho()
+	repo := &firestore.MockPacienteRepository{}
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/reporte", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+
+	err := ReportePacientes(c, repo)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, c.Response().Status)
+
+	var resp RespuestaReporte
+	body := c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()
+	err = json.Unmarshal(body, &resp)
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, resp.Total)
+	assert.Equal(t, GruposEtarios{}, resp.GruposEtarios)
+	assert.Equal(t, ClasificacionIMCPoblacion{}, resp.ClasificacionIMC)
+	assert.Equal(t, PromediosReporte{}, resp.Promedios)
+}
+
+// TestReportePacientesRutaRegistrada verifica que el router dirija GET /pacientes/reporte antes que /pacientes/:id.
+func TestReportePacientesRutaRegistrada(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/reporte", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RespuestaReporte
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, 2, resp.Total)
+}

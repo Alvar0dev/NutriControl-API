@@ -578,6 +578,99 @@ func CountPacientes(c echo.Context, repo firestore.PacienteRepository) error {
 	})
 }
 
+// GruposEtarios desglosa la cantidad de pacientes por franja de edad.
+type GruposEtarios struct {
+	Menores int `json:"menores"`
+	Adultos int `json:"adultos"`
+	Mayores int `json:"mayores"`
+}
+
+// ClasificacionIMCPoblacion agrupa la cantidad de pacientes según su categoría OMS de IMC.
+type ClasificacionIMCPoblacion struct {
+	BajoPeso  int `json:"bajo_peso"`
+	Normal    int `json:"normal"`
+	Sobrepeso int `json:"sobrepeso"`
+	Obesidad  int `json:"obesidad"`
+	SinDatos  int `json:"sin_datos"`
+}
+
+// PromediosReporte contiene los promedios poblacionales redondeados a 2 decimales.
+type PromediosReporte struct {
+	Edad            float64 `json:"edad"`
+	Peso            float64 `json:"peso"`
+	PorcentajeGrasa float64 `json:"porcentaje_grasa"`
+	IMC             float64 `json:"imc"`
+}
+
+// RespuestaReporte representa el reporte analítico demográfico y nutricional de la población de pacientes.
+type RespuestaReporte struct {
+	Total            int                       `json:"total"`
+	GruposEtarios    GruposEtarios             `json:"grupos_etarios"`
+	ClasificacionIMC ClasificacionIMCPoblacion `json:"clasificacion_imc"`
+	Promedios        PromediosReporte          `json:"promedios"`
+}
+
+// ReportePacientes genera un reporte analítico consolidado con la distribución demográfica por edad,
+// clasificación nutricional según el IMC (OMS) y los promedios generales de la población.
+func ReportePacientes(c echo.Context, repo firestore.PacienteRepository) error {
+	pacientes, err := repo.GetAll(c.Request().Context(), 0, 0)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
+	}
+
+	total := len(pacientes)
+	reporte := RespuestaReporte{
+		Total: total,
+	}
+
+	var sumaEdad, sumaPeso, sumaGrasa, sumaIMC float64
+	var conIMC int
+
+	for _, p := range pacientes {
+		switch {
+		case p.Edad < 18:
+			reporte.GruposEtarios.Menores++
+		case p.Edad <= 65:
+			reporte.GruposEtarios.Adultos++
+		default:
+			reporte.GruposEtarios.Mayores++
+		}
+
+		sumaEdad += float64(p.Edad)
+		sumaPeso += p.Peso
+		sumaGrasa += p.PorcentajeGrasa
+
+		if p.Altura > 0 && p.Peso > 0 {
+			imc := math.Round((p.Peso/(p.Altura*p.Altura))*100) / 100
+			sumaIMC += imc
+			conIMC++
+			switch clasificarIMC(imc) {
+			case "Bajo peso":
+				reporte.ClasificacionIMC.BajoPeso++
+			case "Normal":
+				reporte.ClasificacionIMC.Normal++
+			case "Sobrepeso":
+				reporte.ClasificacionIMC.Sobrepeso++
+			case "Obesidad":
+				reporte.ClasificacionIMC.Obesidad++
+			}
+		} else {
+			reporte.ClasificacionIMC.SinDatos++
+		}
+	}
+
+	if total > 0 {
+		reporte.Promedios.Edad = math.Round((sumaEdad/float64(total))*100) / 100
+		reporte.Promedios.Peso = math.Round((sumaPeso/float64(total))*100) / 100
+		reporte.Promedios.PorcentajeGrasa = math.Round((sumaGrasa/float64(total))*100) / 100
+	}
+	if conIMC > 0 {
+		reporte.Promedios.IMC = math.Round((sumaIMC/float64(conIMC))*100) / 100
+	}
+
+	return c.JSON(http.StatusOK, reporte)
+}
+
 // ExportPacientesCSV genera un archivo CSV con el listado completo de pacientes registrados.
 // Retorna Content-Type: text/csv; charset=utf-8 y Content-Disposition para forzar descarga.
 func ExportPacientesCSV(c echo.Context, repo firestore.PacienteRepository) error {
@@ -635,6 +728,9 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.GET("/pacientes/stats", func(c echo.Context) error {
 		return StatsPacientes(c, repo)
+	})
+	e.GET("/pacientes/reporte", func(c echo.Context) error {
+		return ReportePacientes(c, repo)
 	})
 	e.GET("/pacientes/count", func(c echo.Context) error {
 		return CountPacientes(c, repo)
