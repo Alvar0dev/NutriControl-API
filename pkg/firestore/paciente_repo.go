@@ -14,4 +14,8 @@ type PacienteRepository interface {
 	GetByID(ctx context.Context, id string) (*models.Paciente, error)
 	Update(ctx context.Context, id string, p models.Paciente) (*models.Paciente, error)
 	Delete(ctx context.Context, id string) error
+	Restore(ctx context.Context, id string) (*models.Paciente, error)
+	GetInactivos(ctx context.Context) ([]models.Paciente, error)
+	AddControl(ctx context.Context, pacienteID string, control models.ControlClinico) (*models.ControlClinico, error)
+	GetControles(ctx context.Context, pacienteID string) ([]models.ControlClinico, error)
 }

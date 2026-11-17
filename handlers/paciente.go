@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -299,6 +300,7 @@ func CreatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 	paciente.Nombre = normalizarNombre(paciente.Nombre)
+	paciente.DeletedAt = nil
 	if err := validarPaciente(*paciente); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -324,6 +326,7 @@ func CreatePacientesBatch(c echo.Context, repo firestore.PacienteRepository) err
 	// Fase de normalización y validación atómica: todos deben ser válidos antes de persistir
 	for i := range pacientes {
 		pacientes[i].Nombre = normalizarNombre(pacientes[i].Nombre)
+		pacientes[i].DeletedAt = nil
 		if err := validarPaciente(pacientes[i]); err != nil {
 			return c.JSON(http.StatusBadRequest, map[string]string{
 				"error": fmt.Sprintf("Paciente en posición %d inválido: %s", i, err.Error()),
@@ -356,6 +359,7 @@ func UpdatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 	p.Nombre = normalizarNombre(p.Nombre)
+	p.DeletedAt = nil
 	if err := validarPaciente(*p); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -543,7 +547,7 @@ func GetPacienteByID(c echo.Context, repo firestore.PacienteRepository) error {
 	return c.JSON(http.StatusOK, paciente)
 }
 
-// DeletePaciente elimina un paciente por su ID.
+// DeletePaciente aplica baja lógica (soft delete) a un paciente por su ID.
 func DeletePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	id := c.Param("id")
 	if id == "" {
@@ -553,6 +557,95 @@ func DeletePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// RestorePaciente reactiva un paciente dado de baja lógica por su ID.
+func RestorePaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+	}
+	paciente, err := repo.Restore(c.Request().Context(), id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente inactivo con ID " + id})
+	}
+	return c.JSON(http.StatusOK, paciente)
+}
+
+// GetPacientesInactivos devuelve los pacientes dados de baja lógica.
+func GetPacientesInactivos(c echo.Context, repo firestore.PacienteRepository) error {
+	inactivos, err := repo.GetInactivos(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes inactivos"})
+	}
+	return c.JSON(http.StatusOK, inactivos)
+}
+
+// CreateControlPaciente registra un control clínico periódico para un paciente activo,
+// calculando automáticamente el IMC si el paciente tiene altura registrada.
+func CreateControlPaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+	}
+
+	ctx := c.Request().Context()
+	paciente, err := repo.GetByID(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+
+	control := new(models.ControlClinico)
+	if err := c.Bind(control); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+
+	if control.Peso <= 0 || control.Peso > pesoMaximo {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("El campo 'peso' debe ser mayor que 0 y menor o igual a %d", pesoMaximo),
+		})
+	}
+	if control.PorcentajeGrasa < 0 || control.PorcentajeGrasa > porcentajeGrasaMaximo {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("El campo 'porcentaje_grasa' debe estar entre 0 y %d", porcentajeGrasaMaximo),
+		})
+	}
+
+	control.ID = ""
+	control.PacienteID = id
+	if control.Fecha.IsZero() {
+		control.Fecha = time.Now().UTC()
+	}
+	if paciente.Altura > 0 {
+		control.IMC = math.Round((control.Peso/(paciente.Altura*paciente.Altura))*100) / 100
+	} else {
+		control.IMC = 0
+	}
+
+	creado, err := repo.AddControl(ctx, id, *control)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al registrar control clínico"})
+	}
+	return c.JSON(http.StatusCreated, creado)
+}
+
+// GetControlesPaciente devuelve el historial de controles clínicos de un paciente activo ordenados cronológicamente.
+func GetControlesPaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+	}
+
+	ctx := c.Request().Context()
+	if _, err := repo.GetByID(ctx, id); err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+
+	controles, err := repo.GetControles(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener controles clínicos"})
+	}
+	return c.JSON(http.StatusOK, controles)
 }
 
 // HealthCheck devuelve el estado operativo del servicio y el modo de persistencia activo.
@@ -738,6 +831,15 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	e.GET("/pacientes/export", func(c echo.Context) error {
 		return ExportPacientesCSV(c, repo)
 	})
+	e.GET("/pacientes/inactivos", func(c echo.Context) error {
+		return GetPacientesInactivos(c, repo)
+	})
+	e.POST("/pacientes/:id/restore", func(c echo.Context) error {
+		return RestorePaciente(c, repo)
+	})
+	e.POST("/pacientes/{id}/restore", func(c echo.Context) error {
+		return RestorePaciente(c, repo)
+	})
 	e.GET("/pacientes/edad/:edad", func(c echo.Context) error {
 		return GetPacientesPorEdad(c, repo)
 	})
@@ -755,6 +857,18 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.GET("/pacientes/{id}/imc", func(c echo.Context) error {
 		return GetPacienteIMC(c, repo)
+	})
+	e.GET("/pacientes/:id/controles", func(c echo.Context) error {
+		return GetControlesPaciente(c, repo)
+	})
+	e.GET("/pacientes/{id}/controles", func(c echo.Context) error {
+		return GetControlesPaciente(c, repo)
+	})
+	e.POST("/pacientes/:id/controles", func(c echo.Context) error {
+		return CreateControlPaciente(c, repo)
+	})
+	e.POST("/pacientes/{id}/controles", func(c echo.Context) error {
+		return CreateControlPaciente(c, repo)
 	})
 	e.GET("/pacientes/:id", func(c echo.Context) error {
 		return GetPacienteByID(c, repo)

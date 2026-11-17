@@ -3,6 +3,8 @@ package firestore
 import (
 	"context"
 	"fmt"
+	"sort"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
@@ -41,22 +43,11 @@ func (r *PacienteFirestoreRepo) Create(ctx context.Context, p models.Paciente) (
 	return &p, nil
 }
 
-// GetAll recupera pacientes de Firestore aplicando paginación nativa (limit/offset).
+// GetAll recupera pacientes activos de Firestore aplicando paginación (limit/offset) sobre registros sin DeletedAt.
 // Cuando limit <= 0 no se aplica límite; cuando offset <= 0 no se aplica offset.
 func (r *PacienteFirestoreRepo) GetAll(ctx context.Context, limit, offset int) ([]models.Paciente, error) {
-	var pacientes []models.Paciente
-
-	var iter *firestore.DocumentIterator
-	switch {
-	case limit > 0 && offset > 0:
-		iter = r.col.Limit(limit).Offset(offset).Documents(ctx)
-	case limit > 0:
-		iter = r.col.Limit(limit).Documents(ctx)
-	case offset > 0:
-		iter = r.col.Offset(offset).Documents(ctx)
-	default:
-		iter = r.col.Documents(ctx)
-	}
+	activos := make([]models.Paciente, 0)
+	iter := r.col.Documents(ctx)
 
 	for {
 		doc, err := iter.Next()
@@ -68,27 +59,57 @@ func (r *PacienteFirestoreRepo) GetAll(ctx context.Context, limit, offset int) (
 		}
 
 		var p models.Paciente
-		p.ID = doc.Ref.ID
 		if err := doc.DataTo(&p); err != nil {
 			return nil, err
 		}
-		pacientes = append(pacientes, p)
+		p.ID = doc.Ref.ID
+		if p.DeletedAt != nil {
+			continue
+		}
+		activos = append(activos, p)
 	}
-	return pacientes, nil
+
+	total := len(activos)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return []models.Paciente{}, nil
+	}
+	end := total
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	return activos[offset:end], nil
 }
 
-// Update modifica un paciente existente en Firestore.
+// Update modifica un paciente activo existente en Firestore.
 func (r *PacienteFirestoreRepo) Update(ctx context.Context, id string, p models.Paciente) (*models.Paciente, error) {
-	doc := r.col.Doc(id)
-	_, err := doc.Set(ctx, p)
+	docRef := r.col.Doc(id)
+	doc, err := docRef.Get(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if !doc.Exists() {
+		return nil, fmt.Errorf("no se encontró paciente con ID %s", id)
+	}
+	var existing models.Paciente
+	if err := doc.DataTo(&existing); err != nil {
+		return nil, err
+	}
+	if existing.DeletedAt != nil {
+		return nil, fmt.Errorf("no se encontró paciente con ID %s", id)
+	}
+
+	p.DeletedAt = nil
+	if _, err := docRef.Set(ctx, p); err != nil {
 		return nil, err
 	}
 	p.ID = id
 	return &p, nil
 }
 
-// GetByID recupera un paciente por su ID desde Firestore.
+// GetByID recupera un paciente activo por su ID desde Firestore.
 func (r *PacienteFirestoreRepo) GetByID(ctx context.Context, id string) (*models.Paciente, error) {
 	doc, err := r.col.Doc(id).Get(ctx)
 	if err != nil {
@@ -102,12 +123,130 @@ func (r *PacienteFirestoreRepo) GetByID(ctx context.Context, id string) (*models
 	if err := doc.DataTo(&p); err != nil {
 		return nil, err
 	}
+	if p.DeletedAt != nil {
+		return nil, fmt.Errorf("no se encontró paciente con ID %s", id)
+	}
 	p.ID = doc.Ref.ID
 	return &p, nil
 }
 
-// Delete elimina un paciente de Firestore por su ID.
+// Delete realiza baja lógica (soft delete) de un paciente en Firestore marcando DeletedAt.
 func (r *PacienteFirestoreRepo) Delete(ctx context.Context, id string) error {
-	_, err := r.col.Doc(id).Delete(ctx)
+	docRef := r.col.Doc(id)
+	doc, err := docRef.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if !doc.Exists() {
+		return fmt.Errorf("no se encontró paciente con ID %s", id)
+	}
+
+	var p models.Paciente
+	if err := doc.DataTo(&p); err != nil {
+		return err
+	}
+	if p.DeletedAt != nil {
+		return fmt.Errorf("no se encontró paciente con ID %s", id)
+	}
+
+	now := time.Now().UTC()
+	p.DeletedAt = &now
+	_, err = docRef.Set(ctx, p)
 	return err
+}
+
+// Restore reactiva un paciente dado de baja lógica en Firestore limpiando DeletedAt.
+func (r *PacienteFirestoreRepo) Restore(ctx context.Context, id string) (*models.Paciente, error) {
+	docRef := r.col.Doc(id)
+	doc, err := docRef.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !doc.Exists() {
+		return nil, fmt.Errorf("no se encontró paciente inactivo con ID %s", id)
+	}
+
+	var p models.Paciente
+	if err := doc.DataTo(&p); err != nil {
+		return nil, err
+	}
+	if p.DeletedAt == nil {
+		return nil, fmt.Errorf("no se encontró paciente inactivo con ID %s", id)
+	}
+
+	p.DeletedAt = nil
+	if _, err := docRef.Set(ctx, p); err != nil {
+		return nil, err
+	}
+	p.ID = docRef.ID
+	return &p, nil
+}
+
+// GetInactivos recupera los pacientes dados de baja lógica desde Firestore.
+func (r *PacienteFirestoreRepo) GetInactivos(ctx context.Context) ([]models.Paciente, error) {
+	inactivos := make([]models.Paciente, 0)
+	iter := r.col.Documents(ctx)
+
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		var p models.Paciente
+		if err := doc.DataTo(&p); err != nil {
+			return nil, err
+		}
+		if p.DeletedAt == nil {
+			continue
+		}
+		p.ID = doc.Ref.ID
+		inactivos = append(inactivos, p)
+	}
+	return inactivos, nil
+}
+
+// AddControl registra un nuevo control clínico en la subcolección "controles" de un paciente activo.
+func (r *PacienteFirestoreRepo) AddControl(ctx context.Context, pacienteID string, control models.ControlClinico) (*models.ControlClinico, error) {
+	if _, err := r.GetByID(ctx, pacienteID); err != nil {
+		return nil, err
+	}
+	control.PacienteID = pacienteID
+	docRef, _, err := r.col.Doc(pacienteID).Collection("controles").Add(ctx, control)
+	if err != nil {
+		return nil, err
+	}
+	control.ID = docRef.ID
+	return &control, nil
+}
+
+// GetControles recupera los controles clínicos de un paciente activo ordenados cronológicamente (Fecha ascendente).
+func (r *PacienteFirestoreRepo) GetControles(ctx context.Context, pacienteID string) ([]models.ControlClinico, error) {
+	if _, err := r.GetByID(ctx, pacienteID); err != nil {
+		return nil, err
+	}
+	controles := make([]models.ControlClinico, 0)
+	iter := r.col.Doc(pacienteID).Collection("controles").Documents(ctx)
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var c models.ControlClinico
+		if err := doc.DataTo(&c); err != nil {
+			return nil, err
+		}
+		c.ID = doc.Ref.ID
+		controles = append(controles, c)
+	}
+	sort.SliceStable(controles, func(i, j int) bool {
+		return controles[i].Fecha.Before(controles[j].Fecha)
+	})
+	return controles, nil
 }

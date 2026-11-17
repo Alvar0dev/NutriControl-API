@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"nutricontrol/models"
 
@@ -66,4 +67,119 @@ func TestMockGetAllRespetaLimitYOffset(t *testing.T) {
 	res, err = repo.GetAll(context.Background(), 0, 0)
 	require.NoError(t, err)
 	assert.Len(t, res, 5)
+}
+
+func TestMockSoftDeleteYRestore(t *testing.T) {
+	repo := NewMockPacienteRepository()
+	ctx := context.Background()
+
+	creado, err := repo.Create(ctx, models.Paciente{Nombre: "Paciente Temporal", Edad: 28, Peso: 70.0})
+	require.NoError(t, err)
+
+	// Soft delete
+	err = repo.Delete(ctx, creado.ID)
+	require.NoError(t, err)
+
+	// Excluido de GetByID y GetAll
+	_, err = repo.GetByID(ctx, creado.ID)
+	assert.Error(t, err)
+
+	activos, err := repo.GetAll(ctx, 0, 0)
+	require.NoError(t, err)
+	assert.Len(t, activos, 2)
+
+	// No se puede eliminar dos veces ni actualizar mientras esté inactivo
+	err = repo.Delete(ctx, creado.ID)
+	assert.Error(t, err)
+	_, err = repo.Update(ctx, creado.ID, models.Paciente{Nombre: "Otro", Edad: 29, Peso: 71.0})
+	assert.Error(t, err)
+
+	// Aparece en GetInactivos con DeletedAt seteado
+	inactivos, err := repo.GetInactivos(ctx)
+	require.NoError(t, err)
+	require.Len(t, inactivos, 1)
+	assert.Equal(t, creado.ID, inactivos[0].ID)
+	assert.NotNil(t, inactivos[0].DeletedAt)
+
+	// Restore vuelve a activarlo
+	restaurado, err := repo.Restore(ctx, creado.ID)
+	require.NoError(t, err)
+	assert.Nil(t, restaurado.DeletedAt)
+
+	recuperado, err := repo.GetByID(ctx, creado.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Paciente Temporal", recuperado.Nombre)
+
+	inactivosPost, err := repo.GetInactivos(ctx)
+	require.NoError(t, err)
+	assert.Len(t, inactivosPost, 0)
+
+	// Restore sobre paciente activo o inexistente falla
+	_, err = repo.Restore(ctx, creado.ID)
+	assert.Error(t, err)
+	_, err = repo.Restore(ctx, "no-existe")
+	assert.Error(t, err)
+}
+
+func TestMockGetAllPaginacionExcluyeSoftDeleted(t *testing.T) {
+	repo := NewMockPacienteRepository()
+	ctx := context.Background()
+
+	p1, err := repo.Create(ctx, models.Paciente{Nombre: "P1", Edad: 20, Peso: 60.0})
+	require.NoError(t, err)
+	_, err = repo.Create(ctx, models.Paciente{Nombre: "P2", Edad: 21, Peso: 61.0})
+	require.NoError(t, err)
+
+	// Eliminar P1 (queda en medio de m.store: Juan, Maria, P1(del), P2)
+	err = repo.Delete(ctx, p1.ID)
+	require.NoError(t, err)
+
+	// limit=2, offset=1 debe saltar a Juan y devolver [Maria Gomez, P2]
+	res, err := repo.GetAll(ctx, 2, 1)
+	require.NoError(t, err)
+	require.Len(t, res, 2)
+	assert.Equal(t, "Maria Gomez", res[0].Nombre)
+	assert.Equal(t, "P2", res[1].Nombre)
+}
+
+func TestMockAddYGetControles(t *testing.T) {
+	// Probar también struct literal vacío (nil map safety)
+	repoVacio := &MockPacienteRepository{}
+	_, err := repoVacio.AddControl(context.Background(), "no-existe", models.ControlClinico{Peso: 70})
+	assert.Error(t, err)
+
+	repo := NewMockPacienteRepository()
+	ctx := context.Background()
+	creado, err := repo.Create(ctx, models.Paciente{Nombre: "Control Test", Edad: 30, Peso: 80.0, Altura: 1.80})
+	require.NoError(t, err)
+
+	// Lista vacía inicial
+	listaInicial, err := repo.GetControles(ctx, creado.ID)
+	require.NoError(t, err)
+	assert.Len(t, listaInicial, 0)
+
+	// Agregar 2 controles fuera de orden cronológico para verificar ordenamiento por Fecha asc
+	t2 := time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC)
+	t1 := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	c2, err := repo.AddControl(ctx, creado.ID, models.ControlClinico{Fecha: t2, Peso: 78.0, PorcentajeGrasa: 19.0, IMC: 24.07})
+	require.NoError(t, err)
+	assert.NotEmpty(t, c2.ID)
+	assert.Equal(t, creado.ID, c2.PacienteID)
+
+	c1, err := repo.AddControl(ctx, creado.ID, models.ControlClinico{Fecha: t1, Peso: 80.0, PorcentajeGrasa: 20.5, IMC: 24.69})
+	require.NoError(t, err)
+	assert.NotEmpty(t, c1.ID)
+
+	controles, err := repo.GetControles(ctx, creado.ID)
+	require.NoError(t, err)
+	require.Len(t, controles, 2)
+	assert.True(t, controles[0].Fecha.Equal(t1))
+	assert.True(t, controles[1].Fecha.Equal(t2))
+
+	// Paciente eliminado lógicamente no admite lectura/creación de controles
+	require.NoError(t, repo.Delete(ctx, creado.ID))
+	_, err = repo.GetControles(ctx, creado.ID)
+	assert.Error(t, err)
+	_, err = repo.AddControl(ctx, creado.ID, models.ControlClinico{Fecha: t2, Peso: 77.0})
+	assert.Error(t, err)
 }
