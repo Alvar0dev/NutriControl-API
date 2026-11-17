@@ -43,6 +43,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T22 | S1 | inline | done | `00e49ce` feat: endpoint POST /pacientes/batch para alta masiva validada |
 | T23 | S1 | inline | done | `d413d02` feat: extensión de dominio con Altura y endpoints de cálculo de IMC |
 | T24 | S1 | inline | done | `79d9c53` feat: endpoint GET /pacientes/reporte para analítica poblacional |
+| T25 | S1 | inline | done | `be4cc9a` feat: soft delete en pacientes e historial de controles clínicos |
 
 ## Log
 
@@ -143,5 +144,17 @@ L22: [usuario] "Guarda todo el proceso en la documentacion con todas las dificul
 L22: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.12 (invariante contable con `sin_datos` para pacientes sin altura, promedio condicional de IMC sobre `conIMC > 0`, consulta del padrón completo con `GetAll(ctx, 0, 0)`, reutilización de `clasificarIMC` con redondeo previo a 2 decimales y precedencia de ruta estática `/pacientes/reporte` en Echo v4) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (3.2, 6.14 y dificultad 16), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
 - Commiteado y pusheado a `origin/main`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: Soft delete en pacientes; Opción 2: Historial de seguimiento clínico por paciente; Opción 3: Configuración host RDD).
+
+L23: [usuario] "haz 1 y 2" (Soft delete en pacientes + Historial de controles clínicos por paciente)
+L23: [asistente] Implementadas test-first las opciones 1 y 2 (v1.0.13):
+- Soft delete: agregado `DeletedAt *time.Time` (`json:"deleted_at,omitempty"`) en `models.Paciente`; `Delete` marca `DeletedAt` UTC; `GetAll`, `GetByID` y `Update` excluyen registros con `DeletedAt != nil` (filtrando activos antes de `limit`/`offset`); agregados `Restore` y `GetInactivos` junto con `GET /pacientes/inactivos` y `POST /pacientes/:id/restore`.
+- Historial de controles clínicos: nuevo struct `models.ControlClinico`, métodos `AddControl` y `GetControles` (subcolección `pacientes/{id}/controles` en Firestore, mapa `nil`-safe en mock) y endpoints `POST /pacientes/:id/controles` (valida peso/grasa, fecha UTC por defecto, cálculo automático de IMC si `Altura > 0`) y `GET /pacientes/:id/controles` (orden cronológico ascendente).
+- `go test -count=1 ./...` (85 ejecuciones `--- PASS:` incluyendo subtests), `go vet ./...` y `go build ./...` verdes; verificación independiente read-only `PASS` sobre paridad `repo.go`/`mock.go`. Commit `be4cc9a`.
+
+L24: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L24: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.13 (`DeletedAt *time.Time` con `omitempty` frente a `Activo bool`, filtrado de activos previo a `limit`/`offset` en `GetAll`, inicialización perezosa `nil`-safe de `controles` en `MockPacienteRepository`, simetría `Set` vs `Update` sin tags `firestore:` en `PacienteFirestoreRepo`, precedencia de `/pacientes/inactivos`, cálculo condicional de IMC y brecha de tests en vivo para `repo.go`) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md`, `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Commiteado y pusheado a `origin/main`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: Tests de integración Firestore Emulator; Opción 2: Resumen evolutivo de controles clínicos; Opción 3: Configuración host RDD).
+
 
 

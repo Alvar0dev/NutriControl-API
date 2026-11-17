@@ -1,5 +1,42 @@
 # CHANGELOG.md
 
+## Versión 1.0.13 - 2026-11-17
+
+### Soft delete en pacientes e historial de controles clínicos (`GET /pacientes/inactivos`, `POST /pacientes/:id/restore`, `GET/POST /pacientes/:id/controles`)
+
+- **Extensión del modelo de dominio (`models/paciente.go`)**:
+  - `Paciente`: incorporación del campo `DeletedAt *time.Time` (`json:"deleted_at,omitempty"`). Cuando es `nil`, el paciente está activo y el campo se omite del JSON.
+  - `ControlClinico`: nuevo struct con `ID`, `PacienteID`, `Fecha`, `Peso`, `PorcentajeGrasa`, `IMC` (`omitempty`) y `Notas` (`omitempty`).
+- **Extensión del puerto `PacienteRepository` y adaptadores (`pkg/firestore/`)**:
+  - `Delete(ctx, id)`: pasa a realizar baja lógica marcando `DeletedAt` con `time.Now().UTC()` (tanto en `MockPacienteRepository` como en `PacienteFirestoreRepo`); devuelve error si el registro no existe o ya está dado de baja.
+  - `GetAll(ctx, limit, offset)`, `GetByID(ctx, id)` y `Update(ctx, id, p)`: excluyen automáticamente los registros con `DeletedAt != nil`. En `GetAll`, la paginación (`limit`/`offset`) se aplica sobre los pacientes activos ya filtrados.
+  - `Restore(ctx, id)`: limpia `DeletedAt = nil` en pacientes dados de baja; falla si no existe o ya está activo.
+  - `GetInactivos(ctx)`: devuelve exclusivamente los pacientes con `DeletedAt != nil`.
+  - `AddControl(ctx, pacienteID, control)` y `GetControles(ctx, pacienteID)`: persisten y recuperan controles clínicos ordenados cronológicamente (`Fecha` ascendente) validando previamente que el paciente exista y siga activo (`GetByID`). En Firestore se almacenan en la subcolección `pacientes/{id}/controles`.
+- **Nuevos handlers y protección de escritura (`handlers/paciente.go`)**:
+  - `GetPacientesInactivos` (`GET /pacientes/inactivos`): lista pacientes dados de baja lógica.
+  - `RestorePaciente` (`POST /pacientes/:id/restore` y `{id}/restore`): reactiva un paciente inactivo (`200 OK` o `404 Not Found`).
+  - `CreateControlPaciente` (`POST /pacientes/:id/controles` y `{id}/controles`): valida paciente activo (`404`), `peso` (`> 0 y <= 500`) y `porcentaje_grasa` (`0..100`) (`400`), asigna `Fecha` UTC si se omite, calcula automáticamente `IMC` redondeado a 2 decimales si el paciente tiene `Altura > 0` y responde `201 Created`.
+  - `GetControlesPaciente` (`GET /pacientes/:id/controles` y `{id}/controles`): devuelve el historial cronológico (`200 OK` o `404`).
+  - `CreatePaciente`, `CreatePacientesBatch` y `UpdatePaciente` fuerzan `DeletedAt = nil` para impedir que clientes manipulen la marca de baja en peticiones de alta o actualización.
+- **Tests agregados (85 ejecuciones `--- PASS:` incluyendo subtests)**:
+  - `models/paciente_test.go`: `TestPacienteJSONSerializacionConDeletedAt`, `TestControlClinicoJSONSerializacion`.
+  - `pkg/firestore/mock_test.go`: `TestMockSoftDeleteYRestore`, `TestMockGetAllPaginacionExcluyeSoftDeleted`, `TestMockAddYGetControles`.
+  - `handlers/paciente_test.go`: `TestSoftDeleteExcluyeDeListadosYEndpoints`, `TestGetPacientesInactivosOK`, `TestRestorePacienteOK`, `TestRestorePacienteErrores`, `TestCreateControlPacienteOK`, `TestCreateControlPacienteValidaciones` (table-driven), `TestGetControlesPacienteOK`, `TestControlesPacienteNoEncontradoYSoftDeleted`.
+- `go test -count=1 ./...`, `go vet ./...`, `go build ./...` todos verdes + verificación independiente read-only (`PASS`).
+- Commit: `be4cc9a feat: soft delete en pacientes e historial de controles clínicos`.
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Elección de `DeletedAt *time.Time` con `omitempty` frente a `Activo bool`.** En Go, el valor cero de un booleano es `false`. Introducir `Activo bool` habría provocado que cualquier literal `models.Paciente{Nombre: "X", Edad: 30, Peso: 70}` en los 62 tests existentes o un JSON sin ese campo se interpretara como inactivo. Usar un puntero `*time.Time` (`nil` = activo) mantiene 100% de compatibilidad con la suite previa, conserva la fecha exacta de baja para auditoría y se omite del JSON en pacientes activos.
+2. **Sesgo de paginación en `GetAll` tras soft delete.** Originalmente `MockPacienteRepository.GetAll` aplicaba `offset` y `limit` directamente sobre `m.store`, y `PacienteFirestoreRepo.GetAll` pasaba `.Limit`/`.Offset` antes de filtrar. Si el primer registro está dado de baja lógica, `limit=2` habría devuelto solo 1 elemento y en Firestore los documentos históricos sin campo `deleted_at` no coinciden con filtros `== null`. Por eso ambas implementaciones filtran primero los registros con `DeletedAt == nil` y aplican después `offset` y `limit` sobre el conjunto activo.
+3. **Seguridad frente a `nil` map en instanciaciones literales `&MockPacienteRepository{}`.** Varios tests previos del repositorio crean el mock mediante `&firestore.MockPacienteRepository{}` sin invocar `NewMockPacienteRepository()`. Al añadir el mapa `controles map[string][]models.ControlClinico`, se inicializó de forma perezosa (`if m.controles == nil`) en `AddControl` y se validó su nulidad en `GetControles` para evitar `panic: assignment to entry in nil map`.
+4. **Coherencia de serialización en `PacienteFirestoreRepo` sin etiquetas `firestore:`.** `models.Paciente` solo declara etiquetas `json:"..."`, por lo que el SDK de Firestore persiste las propiedades con el nombre del campo Go (`DeletedAt`). Si `Delete` hubiera usado `docRef.Update` con path `"deleted_at"`, habría escrito un campo distinto al que lee `doc.DataTo(&p)`. Al usar `docRef.Set(ctx, p)` tras mutar `p.DeletedAt` (tanto en `Delete` como en `Restore`), la escritura y la lectura mantienen total simetría.
+5. **Precedencia de `/pacientes/inactivos` y blindaje de `DeletedAt` en endpoints de escritura.** `/pacientes/inactivos` se registró en `SetupRoutes` antes de `/pacientes/:id` para evitar que Echo interprete `"inactivos"` como un ID; además, los endpoints de creación y actualización (`POST`, `POST /batch`, `PUT`) limpian `DeletedAt = nil` para evitar bajas simuladas vía payload.
+6. **Cálculo condicional de `IMC` y ordenamiento cronológico en controles clínicos.** Dado que `Altura` es opcional en `models.Paciente`, `CreateControlPaciente` calcula y guarda `IMC` redondeado a 2 decimales solo cuando `paciente.Altura > 0` (evitando divisiones por cero) y asigna `time.Now().UTC()` si `Fecha` viene vacía; `GetControles` ordena con `sort.SliceStable` por `Fecha.Before` para asegurar una línea temporal consistente independientemente del orden de inserción.
+7. **Brecha de cobertura en `PacienteFirestoreRepo` sin emulador en vivo.** Los tests unitarios ejercitan `MockPacienteRepository`, por lo que la lógica agregada en `pkg/firestore/repo.go` queda verificada por compilación, `go vet` e inspección independiente de paridad contra el mock, quedando la batería de integración contra Firestore Emulator como TODO explícito.
+
+---
 ## Versión 1.0.12 - 2026-11-16
 
 ### Endpoint `GET /pacientes/reporte` (Analítica demográfica y nutricional de la población)

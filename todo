@@ -29,11 +29,14 @@
 - [done] Documentar dificultades y decisiones de diseño v1.0.11 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
 - [done] Opción 1: Endpoint GET /pacientes/reporte (agrupación analítica por rangos etarios y nutricionales) (v1.0.12) (commit 79d9c53)
 - [done] Documentar dificultades y decisiones de diseño v1.0.12 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
-- [pending] Opción 1: Soft delete en pacientes (baja lógica con campo activo/deleted_at y exclusión por defecto en listados)
-- [pending] Opción 2: Historial de controles clínicos por paciente (sub-recurso GET/POST /pacientes/:id/controles para evolución de peso/grasa/IMC)
+- [done] Opción 1: Soft delete en pacientes (DeletedAt, exclusión en consultas, GET /pacientes/inactivos y POST /pacientes/:id/restore) (v1.0.13) (commit be4cc9a)
+- [done] Opción 2: Historial de controles clínicos por paciente (ControlClinico, GET/POST /pacientes/:id/controles con cálculo automático de IMC) (v1.0.13) (commit be4cc9a)
+- [done] Documentar dificultades y decisiones de diseño v1.0.13 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
+- [pending] Opción 1: Tests de integración para PacienteFirestoreRepo contra Firestore Emulator (skippables con -short)
+- [pending] Opción 2: Resumen evolutivo clínico por paciente (GET /pacientes/:id/controles/resumen con delta de peso, grasa e IMC)
 - [pending] Opción 3: Asignar modelo a lente review-readability en models.json si se desea reactivar RDD
 
-=== Estado actual (2026-11-16) ===
+=== Estado actual (2026-11-17) ===
 
-Estado git: 62 tests top-level / 72 ejecuciones totales incluyendo subtests pasando (handlers, models, pkg/firestore), go vet/build verdes.
-Pendientes: Opción 1 (soft delete), Opción 2 (historial de controles) y Opción 3 (host RDD).
+Estado git: rama main sincronizada con origin/main (85 ejecuciones --- PASS: incluyendo subtests, go vet y go build verdes).
+Pendientes: Opción 1 (tests Firestore Emulator), Opción 2 (resumen evolutivo clínico) y Opción 3 (host RDD).
