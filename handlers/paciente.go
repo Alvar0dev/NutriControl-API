@@ -648,6 +648,75 @@ func GetControlesPaciente(c echo.Context, repo firestore.PacienteRepository) err
 	return c.JSON(http.StatusOK, controles)
 }
 
+// ResumenControles resume la evolución clínica de un paciente entre su primer y último control registrado.
+type ResumenControles struct {
+	PacienteID             string     `json:"paciente_id"`
+	TotalControles         int        `json:"total_controles"`
+	FechaInicio            *time.Time `json:"fecha_inicio,omitempty"`
+	FechaFin               *time.Time `json:"fecha_fin,omitempty"`
+	PesoInicial            float64    `json:"peso_inicial"`
+	PesoActual             float64    `json:"peso_actual"`
+	DeltaPeso              float64    `json:"delta_peso"`
+	PorcentajeGrasaInicial float64    `json:"porcentaje_grasa_inicial"`
+	PorcentajeGrasaActual  float64    `json:"porcentaje_grasa_actual"`
+	DeltaPorcentajeGrasa   float64    `json:"delta_porcentaje_grasa"`
+	IMCInicial             float64    `json:"imc_inicial"`
+	IMCActual              float64    `json:"imc_actual"`
+	DeltaIMC               float64    `json:"delta_imc"`
+}
+
+func redondear2(val float64) float64 {
+	return math.Round(val*100) / 100
+}
+
+// GetResumenControlesPaciente calcula el resumen evolutivo de peso, porcentaje de grasa e IMC
+// entre el primer y último control clínico de un paciente activo.
+func GetResumenControlesPaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+	}
+
+	ctx := c.Request().Context()
+	if _, err := repo.GetByID(ctx, id); err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+
+	controles, err := repo.GetControles(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener controles clínicos"})
+	}
+
+	resumen := ResumenControles{
+		PacienteID:     id,
+		TotalControles: len(controles),
+	}
+	if len(controles) == 0 {
+		return c.JSON(http.StatusOK, resumen)
+	}
+
+	primero := controles[0]
+	ultimo := controles[len(controles)-1]
+	fechaInicio := primero.Fecha
+	fechaFin := ultimo.Fecha
+
+	resumen.FechaInicio = &fechaInicio
+	resumen.FechaFin = &fechaFin
+	resumen.PesoInicial = primero.Peso
+	resumen.PesoActual = ultimo.Peso
+	resumen.DeltaPeso = redondear2(ultimo.Peso - primero.Peso)
+	resumen.PorcentajeGrasaInicial = primero.PorcentajeGrasa
+	resumen.PorcentajeGrasaActual = ultimo.PorcentajeGrasa
+	resumen.DeltaPorcentajeGrasa = redondear2(ultimo.PorcentajeGrasa - primero.PorcentajeGrasa)
+	resumen.IMCInicial = primero.IMC
+	resumen.IMCActual = ultimo.IMC
+	if primero.IMC > 0 && ultimo.IMC > 0 {
+		resumen.DeltaIMC = redondear2(ultimo.IMC - primero.IMC)
+	}
+
+	return c.JSON(http.StatusOK, resumen)
+}
+
 // HealthCheck devuelve el estado operativo del servicio y el modo de persistencia activo.
 func HealthCheck(c echo.Context, repo firestore.PacienteRepository) error {
 	storage := "firestore"
@@ -857,6 +926,12 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.GET("/pacientes/{id}/imc", func(c echo.Context) error {
 		return GetPacienteIMC(c, repo)
+	})
+	e.GET("/pacientes/:id/controles/resumen", func(c echo.Context) error {
+		return GetResumenControlesPaciente(c, repo)
+	})
+	e.GET("/pacientes/{id}/controles/resumen", func(c echo.Context) error {
+		return GetResumenControlesPaciente(c, repo)
 	})
 	e.GET("/pacientes/:id/controles", func(c echo.Context) error {
 		return GetControlesPaciente(c, repo)

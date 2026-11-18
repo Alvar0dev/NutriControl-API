@@ -2145,3 +2145,136 @@ func TestControlesPacienteNoEncontradoYSoftDeleted(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, recPost.Code)
 	}
 }
+
+// TestGetResumenControlesPacienteOK verifica el cálculo evolutivo entre el primer y último control clínico.
+func TestGetResumenControlesPacienteOK(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	creado, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Evolucion Test",
+		Edad:   31,
+		Peso:   80.0,
+		Altura: 1.80,
+	})
+	require.NoError(t, err)
+
+	f1 := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
+	f2 := time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
+	f3 := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
+
+	// Insertar fuera de orden cronológico para verificar que usa orden temporal real
+	payloads := []string{
+		`{"fecha":"2026-11-15T09:00:00Z","peso":76.0,"porcentaje_grasa":17.5}`,
+		`{"fecha":"2026-10-15T09:00:00Z","peso":80.0,"porcentaje_grasa":20.0}`,
+		`{"fecha":"2026-10-30T09:00:00Z","peso":78.2,"porcentaje_grasa":18.8}`,
+	}
+	for _, p := range payloads {
+		req := httptest.NewRequest(http.MethodPost, "/pacientes/"+creado.ID+"/controles", strings.NewReader(p))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusCreated, rec.Code)
+	}
+	_ = f2
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles/resumen", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resumen ResumenControles
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resumen))
+	assert.Equal(t, creado.ID, resumen.PacienteID)
+	assert.Equal(t, 3, resumen.TotalControles)
+	require.NotNil(t, resumen.FechaInicio)
+	require.NotNil(t, resumen.FechaFin)
+	assert.True(t, resumen.FechaInicio.Equal(f1))
+	assert.True(t, resumen.FechaFin.Equal(f3))
+	assert.Equal(t, 80.0, resumen.PesoInicial)
+	assert.Equal(t, 76.0, resumen.PesoActual)
+	assert.Equal(t, -4.0, resumen.DeltaPeso)
+	assert.Equal(t, 20.0, resumen.PorcentajeGrasaInicial)
+	assert.Equal(t, 17.5, resumen.PorcentajeGrasaActual)
+	assert.Equal(t, -2.5, resumen.DeltaPorcentajeGrasa)
+	assert.Equal(t, 24.69, resumen.IMCInicial)
+	assert.Equal(t, 23.46, resumen.IMCActual)
+	assert.Equal(t, -1.23, resumen.DeltaIMC)
+}
+
+// TestGetResumenControlesPacienteSinControlesYUnControl verifica casos borde con 0 y 1 control (sin altura).
+func TestGetResumenControlesPacienteSinControlesYUnControl(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	creado, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Borde Controles",
+		Edad:   28,
+		Peso:   65.0,
+	})
+	require.NoError(t, err)
+
+	t.Run("sin controles", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles/resumen", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resumen ResumenControles
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resumen))
+		assert.Equal(t, creado.ID, resumen.PacienteID)
+		assert.Equal(t, 0, resumen.TotalControles)
+		assert.Nil(t, resumen.FechaInicio)
+		assert.Nil(t, resumen.FechaFin)
+		assert.Equal(t, 0.0, resumen.DeltaPeso)
+		assert.Equal(t, 0.0, resumen.DeltaIMC)
+	})
+
+	t.Run("un control sin altura", func(t *testing.T) {
+		reqPost := httptest.NewRequest(http.MethodPost, "/pacientes/"+creado.ID+"/controles", strings.NewReader(`{"fecha":"2026-11-01T10:00:00Z","peso":64.5,"porcentaje_grasa":21.0}`))
+		reqPost.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		recPost := httptest.NewRecorder()
+		e.ServeHTTP(recPost, reqPost)
+		require.Equal(t, http.StatusCreated, recPost.Code)
+
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles/resumen", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var resumen ResumenControles
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resumen))
+		assert.Equal(t, 1, resumen.TotalControles)
+		require.NotNil(t, resumen.FechaInicio)
+		require.NotNil(t, resumen.FechaFin)
+		assert.True(t, resumen.FechaInicio.Equal(*resumen.FechaFin))
+		assert.Equal(t, 64.5, resumen.PesoInicial)
+		assert.Equal(t, 64.5, resumen.PesoActual)
+		assert.Equal(t, 0.0, resumen.DeltaPeso)
+		assert.Equal(t, 0.0, resumen.DeltaPorcentajeGrasa)
+		assert.Equal(t, 0.0, resumen.IMCInicial)
+		assert.Equal(t, 0.0, resumen.IMCActual)
+		assert.Equal(t, 0.0, resumen.DeltaIMC)
+	})
+}
+
+// TestGetResumenControlesPacienteNoEncontradoYSoftDeleted verifica 404 para paciente inexistente o eliminado lógicamente.
+func TestGetResumenControlesPacienteNoEncontradoYSoftDeleted(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Soft Del Resumen", Edad: 30, Peso: 70})
+	require.NoError(t, err)
+	require.NoError(t, repo.Delete(context.Background(), creado.ID))
+
+	for _, id := range []string{"no-existe", creado.ID} {
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+id+"/controles/resumen", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	}
+}
