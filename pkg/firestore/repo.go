@@ -3,6 +3,7 @@ package firestore
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"time"
 
@@ -22,15 +23,24 @@ type PacienteFirestoreRepo struct {
 
 // NewPacienteFirestoreRepo inicializa el repositorio con Firestore.
 func NewPacienteFirestoreRepo(ctx context.Context, projectID string) (*PacienteFirestoreRepo, error) {
-	client, err := firestore.NewClient(ctx, projectID, option.WithEndpoint("firestore.googleapis.com:443"))
+	var opts []option.ClientOption
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		opts = append(opts, option.WithEndpoint("firestore.googleapis.com:443"))
+	}
+	client, err := firestore.NewClient(ctx, projectID, opts...)
 	if err != nil {
 		return nil, err
 	}
 
+	return NewPacienteFirestoreRepoWithClient(client), nil
+}
+
+// NewPacienteFirestoreRepoWithClient inicializa el repositorio reutilizando un cliente Firestore existente.
+func NewPacienteFirestoreRepoWithClient(client *firestore.Client) *PacienteFirestoreRepo {
 	return &PacienteFirestoreRepo{
 		client: client,
 		col:    client.Collection("pacientes"),
-	}, nil
+	}
 }
 
 // Create inserta un nuevo paciente en Firestore.
