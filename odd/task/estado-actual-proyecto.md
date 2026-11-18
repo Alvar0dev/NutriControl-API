@@ -44,6 +44,8 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T23 | S1 | inline | done | `d413d02` feat: extensión de dominio con Altura y endpoints de cálculo de IMC |
 | T24 | S1 | inline | done | `79d9c53` feat: endpoint GET /pacientes/reporte para analítica poblacional |
 | T25 | S1 | inline | done | `be4cc9a` feat: soft delete en pacientes e historial de controles clínicos |
+| T26 | S1 | inline | done | `0660bf5` test: cubrir PacienteFirestoreRepo sobre gRPC in-process y Emulator |
+| T27 | S1 | inline | done | `e220d1c` feat: endpoint GET /pacientes/:id/controles/resumen evolutivo |
 
 ## Log
 
@@ -155,6 +157,17 @@ L24: [usuario] "Guarda todo el proceso en la documentacion con todas las dificul
 L24: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.13 (`DeletedAt *time.Time` con `omitempty` frente a `Activo bool`, filtrado de activos previo a `limit`/`offset` en `GetAll`, inicialización perezosa `nil`-safe de `controles` en `MockPacienteRepository`, simetría `Set` vs `Update` sin tags `firestore:` en `PacienteFirestoreRepo`, precedencia de `/pacientes/inactivos`, cálculo condicional de IMC y brecha de tests en vivo para `repo.go`) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md`, `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
 - Commiteado y pusheado a `origin/main`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: Tests de integración Firestore Emulator; Opción 2: Resumen evolutivo de controles clínicos; Opción 3: Configuración host RDD).
+
+L25: [usuario] "pues haz los risk" (cierre `Risk: item 6` sobre `pkg/firestore/repo.go`)
+L25: [asistente] Agregado `NewPacienteFirestoreRepoWithClient` y soporte condicional para `FIRESTORE_EMULATOR_HOST` en `pkg/firestore/repo.go`, más `pkg/firestore/repo_test.go` con `fakeFirestoreServer` gRPC in-process sobre `firestorepb` (`Commit`, `BatchGetDocuments`, `RunQuery`).
+- Cubiertos CRUD, paginación `GetAll`, soft delete + `Restore` + `GetInactivos` y subcolección `controles` sobre `*firestore.Client` real (81.9% cobertura en `pkg/firestore`). Commit `0660bf5`.
+
+L26: [usuario] "haz el 1 y el 2" (`GET /pacientes/:id/controles/resumen` + consolidación documental, commit y push)
+L26: [asistente] Implementado test-first `GET /pacientes/:id/controles/resumen` (`GetResumenControlesPaciente`, struct `ResumenControles`, helper `redondear2`) en `handlers/paciente.go` y 3 tests en `handlers/paciente_test.go` (`TestGetResumenControlesPacienteOK`, `TestGetResumenControlesPacienteSinControlesYUnControl`, `TestGetResumenControlesPacienteNoEncontradoYSoftDeleted`).
+- `go test -count=1 ./...` (91 ejecuciones `--- PASS:` incluyendo subtests), `go vet ./...` y `go build ./...` verdes. Commit `e220d1c`.
+- Documentación consolidada en `docs/CHANGELOG.md` (v1.0.14), `PROJECT_INDEX.md` (3.2, 4.2, 6.16 y dificultades 19-20), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`, commiteado y pusheado a `origin/main`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: Exportación CSV de controles clínicos o inclusión de `altura` en `ExportPacientesCSV`; Opción 2: Paginación / filtro por rango de fechas en `GET /pacientes/:id/controles`; Opción 3: Configuración host RDD).
+
 
 
 

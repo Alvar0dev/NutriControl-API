@@ -74,6 +74,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | GET | `/pacientes/inactivos` | GetPacientesInactivos | GetInactivos | 200 OK `[Paciente]` |
 | POST | `/pacientes/{id}/restore` | RestorePaciente | Restore | 200 OK `Paciente` / 404 |
 | GET | `/pacientes/{id}/controles` | GetControlesPaciente | GetControles | 200 OK `[ControlClinico]` / 404 |
+| GET | `/pacientes/{id}/controles/resumen` | GetResumenControlesPaciente | GetByID + GetControles | 200 OK `ResumenControles` / 404 |
 | POST | `/pacientes/{id}/controles` | CreateControlPaciente | AddControl | 201 Created `ControlClinico` / 400 / 404 |
 | GET | `/pacientes/search` | SearchPacientes | GetAll(ctx, limit, offset) + filtro en memoria | 200 OK `[Paciente]` paginado |
 | GET | `/pacientes/stats` | StatsPacientes | GetAll(ctx, limit, offset) + agregación en memoria | 200 OK `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` |
@@ -109,7 +110,7 @@ type PacienteRepository interface {
 
 ### 4.2 Adaptadores
 
-- **Firestore real** (`pkg/firestore/repo.go`): `PacienteFirestoreRepo` (filtra `DeletedAt == nil` antes de paginar, usa `Set` para `Delete`/`Restore` y subcolección `pacientes/{id}/controles`).
+- **Firestore real** (`pkg/firestore/repo.go`): `PacienteFirestoreRepo` (filtra `DeletedAt == nil` antes de paginar, usa `Set` para `Delete`/`Restore`, subcolección `pacientes/{id}/controles`, soporta `FIRESTORE_EMULATOR_HOST` e inyección vía `NewPacienteFirestoreRepoWithClient`). Tests gRPC in-process en `pkg/firestore/repo_test.go`.
 - **Mock** (`pkg/firestore/mock.go`): `MockPacienteRepository`. Store en `[]models.Paciente` y `controles map[string][]models.ControlClinico` (no persiste entre arranques).
 
 ### 4.3 Modelo de dominio — `models/paciente.go`
@@ -174,7 +175,7 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` soft delete por ID), restauración y listado de inactivos (`POST /pacientes/:id/restore`, `GET /pacientes/inactivos`), historial de controles clínicos (`GET/POST /pacientes/:id/controles`), `GET /health`, cálculo de IMC (`GET /pacientes/imc/{id}` y `/pacientes/{id}/imc`), reporte analítico (`GET /pacientes/reporte`), alta masiva (`POST /pacientes/batch`), filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100, `altura` 0.30-2.50m) y normalización de nombres. |
+| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` soft delete por ID), restauración y listado de inactivos (`POST /pacientes/:id/restore`, `GET /pacientes/inactivos`), historial y resumen evolutivo de controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/resumen`), `GET /health`, cálculo de IMC (`GET /pacientes/imc/{id}` y `/pacientes/{id}/imc`), reporte analítico (`GET /pacientes/reporte`), alta masiva (`POST /pacientes/batch`), filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100, `altura` 0.30-2.50m) y normalización de nombres. |
 | Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). |
 | Build | `go build ./...` y `go vet ./...` OK. |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
@@ -305,7 +306,18 @@ go vet ./...                     # Verificación estándar
 - Tests en `models/paciente_test.go`, `pkg/firestore/mock_test.go` y `handlers/paciente_test.go` (85 ejecuciones `--- PASS:` incluyendo subtests).
 - Commit: `be4cc9a feat: soft delete en pacientes e historial de controles clínicos`.
 
-### 6.16 Dificultades acumuladas y decisiones de diseño
+### 6.16 Feature: Cobertura gRPC de `PacienteFirestoreRepo` y resumen evolutivo clínico `GET /pacientes/:id/controles/resumen` (v1.0.14)
+
+- **Cierre de cobertura en `pkg/firestore/` (`repo_test.go`, `repo.go`)**:
+  - `NewPacienteFirestoreRepoWithClient` y detección de `FIRESTORE_EMULATOR_HOST` en `NewPacienteFirestoreRepo`.
+  - `fakeFirestoreServer` in-process sobre `firestorepb` (`Commit`, `BatchGetDocuments`, `RunQuery`) para ejercitar `Create`, `GetAll`, `GetByID`, `Update`, `Delete`, `Restore`, `GetInactivos`, `AddControl` y `GetControles` a través del `*firestore.Client` real (81.9% de cobertura en `pkg/firestore`).
+  - Commit: `0660bf5 test: cubrir PacienteFirestoreRepo sobre gRPC in-process y Emulator`.
+- **Resumen evolutivo clínico (`GET /pacientes/:id/controles/resumen`)**:
+  - Struct `ResumenControles`, helper `redondear2` y handler `GetResumenControlesPaciente` en `handlers/paciente.go`: devuelve `total_controles`, `fecha_inicio`/`fecha_fin`, valores iniciales y actuales más `delta_peso`, `delta_porcentaje_grasa` y `delta_imc` (calculado solo cuando primer y último control tienen `IMC > 0`).
+  - Tests: `TestGetResumenControlesPacienteOK`, `TestGetResumenControlesPacienteSinControlesYUnControl` y `TestGetResumenControlesPacienteNoEncontradoYSoftDeleted` (91 ejecuciones `--- PASS:` totales).
+  - Commit: `e220d1c feat: endpoint GET /pacientes/:id/controles/resumen evolutivo`.
+
+### 6.17 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -325,7 +337,8 @@ go vet ./...                     # Verificación estándar
 16. **Invariante contable con `sin_datos` y promedio condicional de IMC en `GET /pacientes/reporte`**: dado que `Altura` es opcional (`omitempty`), los registros previos sin altura (como los 2 pacientes del seed del mock) no permiten calcular el IMC. En `ReportePacientes` se agregó el contador explícito `sin_datos` dentro de `clasificacion_imc` para que la suma de categorías coincida siempre con `total`, y `promedios.imc` se divide exclusivamente entre los pacientes con IMC válido (`conIMC > 0`), reutilizando `clasificarIMC` tras redondear a 2 decimales para mantener consistencia exacta con `GET /pacientes/imc/:id`.
 17. **Puntero `DeletedAt *time.Time` y paginación sobre activos tras soft delete**: usar `*time.Time` con `omitempty` en vez de `Activo bool` evitó que el valor cero (`false`) invalidara todos los literales de `models.Paciente` en tests existentes; además, `GetAll` filtra `DeletedAt == nil` antes de aplicar `limit`/`offset` tanto en el mock como en `PacienteFirestoreRepo` para no devolver páginas recortadas ni perder documentos históricos sin campo `deleted_at`.
 18. **`nil`-safety en el mock y simetría de nombres en Firestore**: `MockPacienteRepository` inicializa `controles` de forma perezosa para soportar instanciaciones directas `&MockPacienteRepository{}` en tests existentes; en `PacienteFirestoreRepo`, `Delete` y `Restore` usan `docRef.Set` sobre el struct decodificado en lugar de `Update("deleted_at")` porque `models.Paciente` carece de tags `firestore:"..."`.
-19. **Pendiente de cobertura en vivo para `PacienteFirestoreRepo`**: la suite local ejercita `MockPacienteRepository`, por lo que la implementación real de Firestore queda verificada por compilación, `go vet` e inspección independiente de paridad contra el mock hasta incorporar tests con Firestore Emulator.
+19. **Cierre de cobertura de `PacienteFirestoreRepo` mediante gRPC in-process y `FIRESTORE_EMULATOR_HOST`**: la brecha detectada en v1.0.13 (`Risk: item 6`) se resolvió con `fakeFirestoreServer` sobre `firestorepb` (`Commit`, `BatchGetDocuments`, `RunQuery`) conectado a `*firestore.Client` por loopback (`81.9%` de cobertura en `pkg/firestore`), y condicionando `option.WithEndpoint` en `NewPacienteFirestoreRepo` para respetar `FIRESTORE_EMULATOR_HOST`.
+20. **Deltas evolutivos seguros y fechas opcionales en `GET /pacientes/:id/controles/resumen`**: `GetResumenControlesPaciente` usa `redondear2` para evitar deriva IEEE 754 en las restas, calcula `delta_imc` solo cuando primer y último control poseen `IMC > 0`, y emplea `*time.Time` con `omitempty` en `fecha_inicio`/`fecha_fin` para no serializar fechas cero cuando el paciente aún no tiene controles.
 
 ## 7. Convenciones de entrega
 

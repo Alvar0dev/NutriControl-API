@@ -1,5 +1,31 @@
 # CHANGELOG.md
 
+## Versión 1.0.14 - 2026-11-18
+
+### Cobertura real de `PacienteFirestoreRepo` sobre gRPC / Emulator y endpoint evolutivo `GET /pacientes/:id/controles/resumen`
+
+- **Tests reales sobre `*firestore.Client` (`pkg/firestore/repo.go` y `pkg/firestore/repo_test.go`)**:
+  - `NewPacienteFirestoreRepoWithClient(client *firestore.Client)`: permite inyectar clientes Firestore en tests sin alterar la firma pública existente.
+  - `NewPacienteFirestoreRepo(ctx, projectID)`: omite `option.WithEndpoint("firestore.googleapis.com:443")` cuando `FIRESTORE_EMULATOR_HOST` está definido, permitiendo conectar al emulador oficial automáticamente.
+  - `fakeFirestoreServer` in-process sobre `cloud.google.com/go/firestore/apiv1/firestorepb` (`Commit`, `BatchGetDocuments`, `RunQuery`) en `pkg/firestore/repo_test.go`: ejercita las llamadas reales del SDK de Firestore sobre loopback `127.0.0.1:0` (o contra `FIRESTORE_EMULATOR_HOST` si está configurado).
+  - Tests agregados: `TestFirestoreRepoCRUDYGetAllPaginado`, `TestFirestoreRepoSoftDeleteYRestore`, `TestFirestoreRepoControlesClinicos` (elevando `pkg/firestore` al **81.9%** de cobertura de sentencias y cerrando `Risk: item 6`).
+  - Commit: `0660bf5 test: cubrir PacienteFirestoreRepo sobre gRPC in-process y Emulator`.
+- **Endpoint evolutivo `GET /pacientes/:id/controles/resumen` (`handlers/paciente.go`)**:
+  - Struct `ResumenControles`: expone `paciente_id`, `total_controles`, `fecha_inicio` (`omitempty`), `fecha_fin` (`omitempty`), `peso_inicial`, `peso_actual`, `delta_peso`, `porcentaje_grasa_inicial`, `porcentaje_grasa_actual`, `delta_porcentaje_grasa`, `imc_inicial`, `imc_actual` y `delta_imc`.
+  - Handler `GetResumenControlesPaciente` y helper `redondear2`: valida paciente activo (`404` si no existe o fue dado de baja lógica), recupera el historial ordenado cronológicamente vía `repo.GetControles` y calcula la evolución entre el primer y último control registrado.
+  - Rutas `/pacientes/:id/controles/resumen` y `/pacientes/{id}/controles/resumen` registradas en `SetupRoutes` antes de `/pacientes/:id`.
+  - Tests agregados en `handlers/paciente_test.go` (3 nuevos, **91** ejecuciones `--- PASS:` totales incluyendo subtests): `TestGetResumenControlesPacienteOK`, `TestGetResumenControlesPacienteSinControlesYUnControl`, `TestGetResumenControlesPacienteNoEncontradoYSoftDeleted`.
+  - Commit: `e220d1c feat: endpoint GET /pacientes/:id/controles/resumen evolutivo`.
+- `go test -count=1 ./...`, `go vet ./...`, `go build ./...` todos verdes.
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Verificación de `PacienteFirestoreRepo` sin depender de Firebase CLI ni Docker en ejecución.** Aunque el código ya utilizaba el SDK oficial `cloud.google.com/go/firestore`, la suite local solo cubría `MockPacienteRepository`. Como el proyecto ya incorpora `google.golang.org/grpc` y `cloud.google.com/go/firestore/apiv1/firestorepb` en `go.mod`, se implementó `fakeFirestoreServer` en memoria con soporte de precondiciones `Exists`, respuestas `Found`/`Missing` y consultas por prefijo de colección/subcolección en `RunQuery`, evitando dependencias externas y logrando 81.9% de cobertura en `pkg/firestore` en milisegundos.
+2. **Endpoint hardcodeado en `NewPacienteFirestoreRepo` frente a `FIRESTORE_EMULATOR_HOST`.** Forzar siempre `option.WithEndpoint("firestore.googleapis.com:443")` impide que el SDK oficial redirija tráfico cuando existe `FIRESTORE_EMULATOR_HOST`. Condicionar esa opción a `os.Getenv("FIRESTORE_EMULATOR_HOST") == ""` mantiene el comportamiento de producción y habilita pruebas reales contra el emulador sin cambios adicionales.
+3. **Deriva de punto flotante y cálculo condicional de `delta_imc` en `ResumenControles`.** Al restar métricas decimales (`ultimo - primero`) pueden aparecer artefactos IEEE 754, por lo que todos los deltas se redondean con `redondear2` (`math.Round(val*100)/100`). Además, como `Altura` es opcional, un paciente puede tener controles con `IMC == 0`; en ese caso `delta_imc` solo se calcula cuando tanto `primero.IMC > 0` como `ultimo.IMC > 0`, evitando deltas artificiales negativos o positivos cuando falta la altura.
+4. **Representación limpia de `0` controles sin serializar fechas cero.** Si el paciente activo aún no tiene controles clínicos, devolver `200 OK` con `total_controles: 0` mantiene consistencia con `GET /pacientes/:id/controles` (`[]`) y `GET /pacientes/reporte` (`total: 0`). Usar `*time.Time` con `omitempty` para `fecha_inicio` y `fecha_fin` evita emitir `"0001-01-01T00:00:00Z"` cuando no hay controles.
+
+---
 ## Versión 1.0.13 - 2026-11-17
 
 ### Soft delete en pacientes e historial de controles clínicos (`GET /pacientes/inactivos`, `POST /pacientes/:id/restore`, `GET/POST /pacientes/:id/controles`)
