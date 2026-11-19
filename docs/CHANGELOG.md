@@ -1,5 +1,32 @@
 # CHANGELOG.md
 
+## Versión 1.0.15 - 2026-11-19
+
+### Filtrado por rango de fechas y paginación en `GET /pacientes/:id/controles`
+
+- **Helper `parseFechaQuery(valor string, finDeDia bool)` en `handlers/paciente.go`**:
+  - Acepta fechas en formato `RFC3339` (`2026-10-15T15:00:00Z`) o `YYYY-MM-DD` (`2026-10-15`).
+  - Cuando `finDeDia` es `true` y la entrada viene en formato `YYYY-MM-DD`, ajusta el límite al cierre del día UTC (`23:59:59.999999999`).
+  - Rechaza formatos inválidos con `400 Bad Request`.
+- **Actualización de `GetControlesPaciente` (`GET /pacientes/:id/controles`)**:
+  - Valida paciente activo (`404` si no existe o fue dado de baja lógica).
+  - Lee `desde` y `hasta`; si `desde` es posterior a `hasta`, devuelve `400 Bad Request` (`"El parámetro 'desde' no puede ser posterior a 'hasta'"`).
+  - Filtra el historial cronológico de forma inclusiva (`!Fecha.Before(*desde)` y `!Fecha.After(*hasta)`).
+  - Aplica paginación sobre los resultados filtrados reutilizando `paginacionDesdeQuery(c)` (`limit = 10` y `offset = 0` por defecto), devolviendo `[]` vacío si `offset >= total`.
+- **Tests agregados en `handlers/paciente_test.go` (3 nuevos tests / 11 subtests, 94 tests top-level en verde)**:
+  - `TestGetControlesPacienteFiltroFechas`: table-driven cubriendo rangos `YYYY-MM-DD` inclusivos hasta fin de día, `RFC3339` exacto, límite superior único (`?hasta=`) y rango sin coincidencias.
+  - `TestGetControlesPacienteFiltroFechasInvalidas`: table-driven rechazando `desde` inválido, `hasta` inválido y rango invertido (`desde > hasta`) con `400 Bad Request`.
+  - `TestGetControlesPacientePaginacion`: verifica `limit` por defecto en `10`, `limit`/`offset` explícitos, `offset` superior al total y combinación de filtro de fechas + paginación.
+- `go test -count=1 ./...`, `go vet ./...`, `go build ./...` todos verdes.
+- Commit: `8f4cad4 feat: filtrado por fechas y paginación en GET /pacientes/:id/controles`.
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Rango inclusivo al usar `YYYY-MM-DD` sin hora (`finDeDia`).** `time.Parse("2006-01-02", "2026-11-01")` produce `2026-11-01 00:00:00 UTC`. Si `?hasta=2026-11-01` se comparara directamente con ese instante, cualquier control cargado durante ese día (por ejemplo a las `10:00:00Z`) quedaría excluido. Ajustar `hasta` en formato `YYYY-MM-DD` a `23:59:59.999999999 UTC` hace el extremo superior naturalmente inclusivo sin obligar al cliente a enviar marcas horarias completas.
+2. **Precedencia entre existencia del paciente (`404`) y validación de query params (`400`).** `GetControlesPaciente` verifica primero `repo.GetByID` para responder `404` ante un paciente inexistente o eliminado lógicamente, y valida después la sintaxis y orden (`desde <= hasta`) de los parámetros temporales para devolver `400 Bad Request` explícito en lugar de retornar silenciosamente un array vacío ante rangos invertidos.
+3. **Paginación posterior al filtrado y preservación del resumen evolutivo.** Al filtrar primero por fechas en `GetControlesPaciente` y aplicar después `paginacionDesdeQuery` (`limit=10`, `offset=0`), las páginas reflejan exactamente el subconjunto buscado; por su parte, `GetResumenControlesPaciente` sigue consultando directamente `repo.GetControles(ctx, id)` sin pasar por la capa HTTP de paginación, garantizando que el resumen evolutivo considere siempre el historial completo aunque el paciente supere 10 controles.
+
+---
 ## Versión 1.0.14 - 2026-11-18
 
 ### Cobertura real de `PacienteFirestoreRepo` sobre gRPC / Emulator y endpoint evolutivo `GET /pacientes/:id/controles/resumen`

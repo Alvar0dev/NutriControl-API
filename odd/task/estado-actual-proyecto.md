@@ -46,6 +46,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T25 | S1 | inline | done | `be4cc9a` feat: soft delete en pacientes e historial de controles clínicos |
 | T26 | S1 | inline | done | `0660bf5` test: cubrir PacienteFirestoreRepo sobre gRPC in-process y Emulator |
 | T27 | S1 | inline | done | `e220d1c` feat: endpoint GET /pacientes/:id/controles/resumen evolutivo |
+| T28 | S1 | inline | done | `8f4cad4` feat: filtrado por fechas y paginación en GET /pacientes/:id/controles |
 
 ## Log
 
@@ -167,6 +168,17 @@ L26: [asistente] Implementado test-first `GET /pacientes/:id/controles/resumen` 
 - `go test -count=1 ./...` (91 ejecuciones `--- PASS:` incluyendo subtests), `go vet ./...` y `go build ./...` verdes. Commit `e220d1c`.
 - Documentación consolidada en `docs/CHANGELOG.md` (v1.0.14), `PROJECT_INDEX.md` (3.2, 4.2, 6.16 y dificultades 19-20), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`, commiteado y pusheado a `origin/main`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: Exportación CSV de controles clínicos o inclusión de `altura` en `ExportPacientesCSV`; Opción 2: Paginación / filtro por rango de fechas en `GET /pacientes/:id/controles`; Opción 3: Configuración host RDD).
+
+L27: [usuario] "haz todo 1" (Filtrado por rango de fechas `?desde=&hasta=` y paginación en `GET /pacientes/:id/controles`)
+L27: [asistente] Implementado test-first en `handlers/paciente.go` (`parseFechaQuery` y actualización de `GetControlesPaciente`) y `handlers/paciente_test.go` (`TestGetControlesPacienteFiltroFechas`, `TestGetControlesPacienteFiltroFechasInvalidas`, `TestGetControlesPacientePaginacion`, v1.0.15):
+- Soporte dual `RFC3339` y `YYYY-MM-DD` (ajustando `hasta` en `YYYY-MM-DD` a `23:59:59.999999999 UTC`), rechazo `400` ante formato inválido o rango `desde > hasta` y paginación posterior al filtrado vía `paginacionDesdeQuery` (`limit=10`, `offset=0` por defecto).
+- `go test -count=1 ./...` (94 tests top-level en verde), `go vet ./...` y `go build ./...` verdes. Commit `8f4cad4`.
+
+L28: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L28: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.15 (rango inclusivo `YYYY-MM-DD` hasta fin de día UTC, precedencia `404` vs `400`, paginación posterior al filtro sin afectar `GetResumenControlesPaciente`) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (3.2, 6.17 y dificultad 21), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Commiteado y pusheado a `origin/main`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: Exportación CSV de controles clínicos e inclusión de `altura` en `ExportPacientesCSV`; Opción 2: Eliminar/editar control clínico puntual `PUT/DELETE /pacientes/:id/controles/:controlId`; Opción 3: Configuración host RDD).
+
 
 
 
