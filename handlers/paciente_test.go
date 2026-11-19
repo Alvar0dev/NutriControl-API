@@ -2278,3 +2278,178 @@ func TestGetResumenControlesPacienteNoEncontradoYSoftDeleted(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, rec.Code)
 	}
 }
+
+// TestGetControlesPacienteFiltroFechas verifica el filtrado inclusivo por rango de fechas (YYYY-MM-DD y RFC3339).
+func TestGetControlesPacienteFiltroFechas(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Filtro Fechas", Edad: 30, Peso: 75})
+	require.NoError(t, err)
+
+	fechas := []string{
+		"2026-09-10T09:00:00Z",
+		"2026-10-15T14:30:00Z",
+		"2026-11-01T10:00:00Z",
+		"2026-11-20T18:00:00Z",
+	}
+	for i, f := range fechas {
+		parsed, parseErr := time.Parse(time.RFC3339, f)
+		require.NoError(t, parseErr)
+		_, addErr := repo.AddControl(context.Background(), creado.ID, models.ControlClinico{
+			Fecha:           parsed,
+			Peso:            75.0 - float64(i),
+			PorcentajeGrasa: 20.0,
+		})
+		require.NoError(t, addErr)
+	}
+
+	casos := []struct {
+		name          string
+		query         string
+		expectedCount int
+		firstPeso     float64
+	}{
+		{
+			name:          "rango YYYY-MM-DD inclusivo hasta fin de dia",
+			query:         "?desde=2026-10-15&hasta=2026-11-01",
+			expectedCount: 2,
+			firstPeso:     74.0,
+		},
+		{
+			name:          "desde RFC3339 exacto",
+			query:         "?desde=2026-10-15T15:00:00Z",
+			expectedCount: 2,
+			firstPeso:     73.0,
+		},
+		{
+			name:          "solo hasta YYYY-MM-DD",
+			query:         "?hasta=2026-10-15",
+			expectedCount: 2,
+			firstPeso:     75.0,
+		},
+		{
+			name:          "rango sin coincidencias",
+			query:         "?desde=2026-12-01",
+			expectedCount: 0,
+		},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles"+tc.query, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			var res []models.ControlClinico
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res))
+			assert.Len(t, res, tc.expectedCount)
+			if tc.expectedCount > 0 {
+				assert.Equal(t, tc.firstPeso, res[0].Peso)
+			}
+		})
+	}
+}
+
+// TestGetControlesPacienteFiltroFechasInvalidas verifica rechazo 400 ante formatos inválidos o rango invertido.
+func TestGetControlesPacienteFiltroFechasInvalidas(t *testing.T) {
+	casos := []struct {
+		name          string
+		query         string
+		expectedError string
+	}{
+		{name: "desde invalido", query: "?desde=no-es-fecha", expectedError: "desde"},
+		{name: "hasta invalido", query: "?hasta=15/11/2026", expectedError: "hasta"},
+		{name: "desde posterior a hasta", query: "?desde=2026-11-20&hasta=2026-10-01", expectedError: "posterior"},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			repo := firestore.NewMockPacienteRepository()
+			SetupRoutes(e, repo)
+
+			creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Fechas Inv", Edad: 30, Peso: 70})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles"+tc.query, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), tc.expectedError)
+		})
+	}
+}
+
+// TestGetControlesPacientePaginacion verifica limit/offset (default 10) y combinación con filtro de fechas.
+func TestGetControlesPacientePaginacion(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Pag Controles", Edad: 30, Peso: 80})
+	require.NoError(t, err)
+
+	base := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 12; i++ {
+		_, addErr := repo.AddControl(context.Background(), creado.ID, models.ControlClinico{
+			Fecha:           base.AddDate(0, 0, i),
+			Peso:            80.0 - float64(i),
+			PorcentajeGrasa: 20.0,
+		})
+		require.NoError(t, addErr)
+	}
+
+	t.Run("default limit 10", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var res []models.ControlClinico
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res))
+		assert.Len(t, res, 10)
+		assert.Equal(t, 80.0, res[0].Peso)
+	})
+
+	t.Run("limit y offset", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles?limit=3&offset=2", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var res []models.ControlClinico
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res))
+		require.Len(t, res, 3)
+		assert.Equal(t, 78.0, res[0].Peso)
+		assert.Equal(t, 76.0, res[2].Peso)
+	})
+
+	t.Run("offset supera total", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles?limit=5&offset=100", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var res []models.ControlClinico
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res))
+		assert.Len(t, res, 0)
+	})
+
+	t.Run("combinado filtro fechas y paginacion", func(t *testing.T) {
+		// Desde 2026-11-05 (indice 4 -> pesos 76..69, 8 controles); offset=1, limit=2 -> [75, 74]
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles?desde=2026-11-05&limit=2&offset=1", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var res []models.ControlClinico
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &res))
+		require.Len(t, res, 2)
+		assert.Equal(t, 75.0, res[0].Peso)
+		assert.Equal(t, 74.0, res[1].Peso)
+	})
+}

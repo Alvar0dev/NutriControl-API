@@ -629,7 +629,26 @@ func CreateControlPaciente(c echo.Context, repo firestore.PacienteRepository) er
 	return c.JSON(http.StatusCreated, creado)
 }
 
+// parseFechaQuery parsea una fecha de query param en formato RFC3339 o YYYY-MM-DD.
+// Si finDeDia es true y el formato es YYYY-MM-DD, ajusta el límite al final del día UTC (23:59:59.999999999).
+func parseFechaQuery(valor string, finDeDia bool) (*time.Time, error) {
+	if valor == "" {
+		return nil, nil
+	}
+	if t, err := time.Parse(time.RFC3339, valor); err == nil {
+		return &t, nil
+	}
+	if t, err := time.Parse("2006-01-02", valor); err == nil {
+		if finDeDia {
+			t = t.Add(24*time.Hour - time.Nanosecond)
+		}
+		return &t, nil
+	}
+	return nil, fmt.Errorf("formato de fecha inválido")
+}
+
 // GetControlesPaciente devuelve el historial de controles clínicos de un paciente activo ordenados cronológicamente.
+// Soporta filtrado por rango de fechas (?desde=&hasta= en formato YYYY-MM-DD o RFC3339) y paginación (?limit=&offset=).
 func GetControlesPaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	id := c.Param("id")
 	if id == "" {
@@ -641,10 +660,49 @@ func GetControlesPaciente(c echo.Context, repo firestore.PacienteRepository) err
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
 	}
 
+	desde, err := parseFechaQuery(c.QueryParam("desde"), false)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El parámetro 'desde' debe tener formato YYYY-MM-DD o RFC3339"})
+	}
+	hasta, err := parseFechaQuery(c.QueryParam("hasta"), true)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El parámetro 'hasta' debe tener formato YYYY-MM-DD o RFC3339"})
+	}
+	if desde != nil && hasta != nil && desde.After(*hasta) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El parámetro 'desde' no puede ser posterior a 'hasta'"})
+	}
+
 	controles, err := repo.GetControles(ctx, id)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener controles clínicos"})
 	}
+
+	if desde != nil || hasta != nil {
+		filtrados := make([]models.ControlClinico, 0, len(controles))
+		for _, ctrl := range controles {
+			if desde != nil && ctrl.Fecha.Before(*desde) {
+				continue
+			}
+			if hasta != nil && ctrl.Fecha.After(*hasta) {
+				continue
+			}
+			filtrados = append(filtrados, ctrl)
+		}
+		controles = filtrados
+	}
+
+	limit, offset := paginacionDesdeQuery(c)
+	total := len(controles)
+	if offset >= total {
+		controles = []models.ControlClinico{}
+	} else {
+		end := total
+		if limit > 0 && offset+limit < end {
+			end = offset + limit
+		}
+		controles = controles[offset:end]
+	}
+
 	return c.JSON(http.StatusOK, controles)
 }
 
