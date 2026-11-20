@@ -647,34 +647,34 @@ func parseFechaQuery(valor string, finDeDia bool) (*time.Time, error) {
 	return nil, fmt.Errorf("formato de fecha inválido")
 }
 
-// GetControlesPaciente devuelve el historial de controles clínicos de un paciente activo ordenados cronológicamente.
-// Soporta filtrado por rango de fechas (?desde=&hasta= en formato YYYY-MM-DD o RFC3339) y paginación (?limit=&offset=).
-func GetControlesPaciente(c echo.Context, repo firestore.PacienteRepository) error {
+// obtenerControlesFiltrados valida la existencia del paciente activo y los query params ?desde=&hasta=,
+// devolviendo los controles cronológicos filtrados o un código/mensaje de error HTTP.
+func obtenerControlesFiltrados(c echo.Context, repo firestore.PacienteRepository) ([]models.ControlClinico, int, string) {
 	id := c.Param("id")
 	if id == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+		return nil, http.StatusBadRequest, "El campo 'id' es requerido"
 	}
 
 	ctx := c.Request().Context()
 	if _, err := repo.GetByID(ctx, id); err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+		return nil, http.StatusNotFound, "No se encontró paciente con ID " + id
 	}
 
 	desde, err := parseFechaQuery(c.QueryParam("desde"), false)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El parámetro 'desde' debe tener formato YYYY-MM-DD o RFC3339"})
+		return nil, http.StatusBadRequest, "El parámetro 'desde' debe tener formato YYYY-MM-DD o RFC3339"
 	}
 	hasta, err := parseFechaQuery(c.QueryParam("hasta"), true)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El parámetro 'hasta' debe tener formato YYYY-MM-DD o RFC3339"})
+		return nil, http.StatusBadRequest, "El parámetro 'hasta' debe tener formato YYYY-MM-DD o RFC3339"
 	}
 	if desde != nil && hasta != nil && desde.After(*hasta) {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El parámetro 'desde' no puede ser posterior a 'hasta'"})
+		return nil, http.StatusBadRequest, "El parámetro 'desde' no puede ser posterior a 'hasta'"
 	}
 
 	controles, err := repo.GetControles(ctx, id)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener controles clínicos"})
+		return nil, http.StatusInternalServerError, "Error al obtener controles clínicos"
 	}
 
 	if desde != nil || hasta != nil {
@@ -689,6 +689,17 @@ func GetControlesPaciente(c echo.Context, repo firestore.PacienteRepository) err
 			filtrados = append(filtrados, ctrl)
 		}
 		controles = filtrados
+	}
+
+	return controles, 0, ""
+}
+
+// GetControlesPaciente devuelve el historial de controles clínicos de un paciente activo ordenados cronológicamente.
+// Soporta filtrado por rango de fechas (?desde=&hasta= en formato YYYY-MM-DD o RFC3339) y paginación (?limit=&offset=).
+func GetControlesPaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	controles, status, errMsg := obtenerControlesFiltrados(c, repo)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": errMsg})
 	}
 
 	limit, offset := paginacionDesdeQuery(c)
@@ -891,31 +902,16 @@ func ReportePacientes(c echo.Context, repo firestore.PacienteRepository) error {
 	return c.JSON(http.StatusOK, reporte)
 }
 
-// ExportPacientesCSV genera un archivo CSV con el listado completo de pacientes registrados.
-// Retorna Content-Type: text/csv; charset=utf-8 y Content-Disposition para forzar descarga.
-func ExportPacientesCSV(c echo.Context, repo firestore.PacienteRepository) error {
-	pacientes, err := repo.GetAll(c.Request().Context(), 0, 0)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
-	}
-
+// escribirCSV serializa cabecera y filas en formato RFC 4180 y las devuelve como descarga adjunta.
+func escribirCSV(c echo.Context, filename string, header []string, rows [][]string) error {
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
-	// Cabecera según RFC 4180
-	if err := writer.Write([]string{"id", "nombre", "edad", "peso", "porcentaje_grasa", "notas"}); err != nil {
+	if err := writer.Write(header); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al generar CSV"})
 	}
 
-	for _, p := range pacientes {
-		record := []string{
-			p.ID,
-			p.Nombre,
-			strconv.Itoa(p.Edad),
-			strconv.FormatFloat(p.Peso, 'f', -1, 64),
-			strconv.FormatFloat(p.PorcentajeGrasa, 'f', -1, 64),
-			p.Notas,
-		}
+	for _, record := range rows {
 		if err := writer.Write(record); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al escribir registro en CSV"})
 		}
@@ -925,8 +921,66 @@ func ExportPacientesCSV(c echo.Context, repo firestore.PacienteRepository) error
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al finalizar CSV"})
 	}
 
-	c.Response().Header().Set(echo.HeaderContentDisposition, `attachment; filename="pacientes.csv"`)
+	c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, filename))
 	return c.Blob(http.StatusOK, "text/csv; charset=utf-8", buf.Bytes())
+}
+
+// ExportPacientesCSV genera un archivo CSV con el listado completo de pacientes registrados, incluyendo altura.
+// Retorna Content-Type: text/csv; charset=utf-8 y Content-Disposition para forzar descarga.
+func ExportPacientesCSV(c echo.Context, repo firestore.PacienteRepository) error {
+	pacientes, err := repo.GetAll(c.Request().Context(), 0, 0)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener pacientes"})
+	}
+
+	header := []string{"id", "nombre", "edad", "peso", "porcentaje_grasa", "notas", "altura"}
+	rows := make([][]string, 0, len(pacientes))
+	for _, p := range pacientes {
+		alturaStr := ""
+		if p.Altura > 0 {
+			alturaStr = strconv.FormatFloat(p.Altura, 'f', -1, 64)
+		}
+		rows = append(rows, []string{
+			p.ID,
+			p.Nombre,
+			strconv.Itoa(p.Edad),
+			strconv.FormatFloat(p.Peso, 'f', -1, 64),
+			strconv.FormatFloat(p.PorcentajeGrasa, 'f', -1, 64),
+			p.Notas,
+			alturaStr,
+		})
+	}
+
+	return escribirCSV(c, "pacientes.csv", header, rows)
+}
+
+// ExportControlesPacienteCSV exporta en formato CSV RFC 4180 el historial cronológico de controles clínicos
+// de un paciente activo, soportando filtrado opcional por rango de fechas (?desde=&hasta=).
+func ExportControlesPacienteCSV(c echo.Context, repo firestore.PacienteRepository) error {
+	controles, status, errMsg := obtenerControlesFiltrados(c, repo)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": errMsg})
+	}
+
+	header := []string{"id", "paciente_id", "fecha", "peso", "porcentaje_grasa", "imc", "notas"}
+	rows := make([][]string, 0, len(controles))
+	for _, ctrl := range controles {
+		imcStr := ""
+		if ctrl.IMC > 0 {
+			imcStr = strconv.FormatFloat(ctrl.IMC, 'f', -1, 64)
+		}
+		rows = append(rows, []string{
+			ctrl.ID,
+			ctrl.PacienteID,
+			ctrl.Fecha.UTC().Format(time.RFC3339),
+			strconv.FormatFloat(ctrl.Peso, 'f', -1, 64),
+			strconv.FormatFloat(ctrl.PorcentajeGrasa, 'f', -1, 64),
+			imcStr,
+			ctrl.Notas,
+		})
+	}
+
+	return escribirCSV(c, "controles.csv", header, rows)
 }
 
 // SetupRoutes configura las rutas de pacientes con inyección de dependencia.
@@ -990,6 +1044,12 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.GET("/pacientes/{id}/controles/resumen", func(c echo.Context) error {
 		return GetResumenControlesPaciente(c, repo)
+	})
+	e.GET("/pacientes/:id/controles/export", func(c echo.Context) error {
+		return ExportControlesPacienteCSV(c, repo)
+	})
+	e.GET("/pacientes/{id}/controles/export", func(c echo.Context) error {
+		return ExportControlesPacienteCSV(c, repo)
 	})
 	e.GET("/pacientes/:id/controles", func(c echo.Context) error {
 		return GetControlesPaciente(c, repo)

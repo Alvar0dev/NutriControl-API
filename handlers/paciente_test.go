@@ -1308,17 +1308,27 @@ func TestSearchPacientesOrdenamiento(t *testing.T) {
 	}
 }
 
-// TestExportPacientesCSVOK verifica la exportación de pacientes en formato CSV (cabeceras RFC 4180 y datos).
+// TestExportPacientesCSVOK verifica la exportación de pacientes en formato CSV (cabeceras RFC 4180, datos y columna altura).
 func TestExportPacientesCSVOK(t *testing.T) {
 	// Arrange
 	e := newTestEcho()
 	repo := firestore.NewMockPacienteRepository()
+	_, err := repo.Create(context.Background(), models.Paciente{
+		Nombre:          "Carlos Altura",
+		Edad:            35,
+		Peso:            78.0,
+		Altura:          1.75,
+		PorcentajeGrasa: 19.0,
+		Notas:           "Con altura",
+	})
+	require.NoError(t, err)
+
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/pacientes/export", nil)
 	c := e.NewContext(req, rec)
 
 	// Act
-	err := ExportPacientesCSV(c, repo)
+	err = ExportPacientesCSV(c, repo)
 
 	// Assert
 	require.NoError(t, err)
@@ -1330,23 +1340,29 @@ func TestExportPacientesCSVOK(t *testing.T) {
 	records, err := reader.ReadAll()
 	require.NoError(t, err)
 
-	// Cabecera + 2 pacientes del seed
-	require.Len(t, records, 3)
-	assert.Equal(t, []string{"id", "nombre", "edad", "peso", "porcentaje_grasa", "notas"}, records[0])
+	// Cabecera + 2 pacientes del seed + Carlos Altura
+	require.Len(t, records, 4)
+	assert.Equal(t, []string{"id", "nombre", "edad", "peso", "porcentaje_grasa", "notas", "altura"}, records[0])
 
-	// Paciente 1 (Juan Perez)
+	// Paciente 1 (Juan Perez, sin altura)
 	assert.Equal(t, "Juan Perez", records[1][1])
 	assert.Equal(t, "30", records[1][2])
 	assert.Equal(t, "75.5", records[1][3])
 	assert.Equal(t, "18.5", records[1][4])
 	assert.Equal(t, "Primera consulta", records[1][5])
+	assert.Equal(t, "", records[1][6])
 
-	// Paciente 2 (Maria Gomez)
+	// Paciente 2 (Maria Gomez, sin altura)
 	assert.Equal(t, "Maria Gomez", records[2][1])
 	assert.Equal(t, "25", records[2][2])
 	assert.Equal(t, "62", records[2][3])
 	assert.Equal(t, "22", records[2][4])
 	assert.Equal(t, "Seguimiento mensual", records[2][5])
+	assert.Equal(t, "", records[2][6])
+
+	// Paciente 3 (Carlos Altura, 1.75)
+	assert.Equal(t, "Carlos Altura", records[3][1])
+	assert.Equal(t, "1.75", records[3][6])
 }
 
 // TestExportPacientesCSVVacio verifica que un repositorio sin pacientes genere únicamente la cabecera CSV.
@@ -1370,7 +1386,7 @@ func TestExportPacientesCSVVacio(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, records, 1)
-	assert.Equal(t, []string{"id", "nombre", "edad", "peso", "porcentaje_grasa", "notas"}, records[0])
+	assert.Equal(t, []string{"id", "nombre", "edad", "peso", "porcentaje_grasa", "notas", "altura"}, records[0])
 }
 
 // TestExportPacientesCSVRutaRegistrada verifica que el router dirija /pacientes/export al handler de exportación
@@ -2452,4 +2468,124 @@ func TestGetControlesPacientePaginacion(t *testing.T) {
 		assert.Equal(t, 75.0, res[0].Peso)
 		assert.Equal(t, 74.0, res[1].Peso)
 	})
+}
+
+// TestExportControlesPacienteCSVOK verifica la exportación CSV RFC 4180 del historial cronológico de controles de un paciente.
+func TestExportControlesPacienteCSVOK(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	creado, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "CSV Controles",
+		Edad:   30,
+		Peso:   80.0,
+		Altura: 1.80,
+	})
+	require.NoError(t, err)
+
+	f2 := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
+	f1 := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
+	_, err = repo.AddControl(context.Background(), creado.ID, models.ControlClinico{
+		Fecha: f2, Peso: 77.0, PorcentajeGrasa: 18.5, IMC: 23.77, Notas: "Segundo control, buen avance",
+	})
+	require.NoError(t, err)
+	_, err = repo.AddControl(context.Background(), creado.ID, models.ControlClinico{
+		Fecha: f1, Peso: 80.0, PorcentajeGrasa: 20.0, IMC: 24.69, Notas: "Inicio",
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles/export", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Header().Get(echo.HeaderContentType), "text/csv")
+	assert.Equal(t, `attachment; filename="controles.csv"`, rec.Header().Get(echo.HeaderContentDisposition))
+
+	records, err := csv.NewReader(rec.Body).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 3)
+	assert.Equal(t, []string{"id", "paciente_id", "fecha", "peso", "porcentaje_grasa", "imc", "notas"}, records[0])
+
+	// Orden cronológico: f1 primero, f2 segundo
+	assert.Equal(t, creado.ID, records[1][1])
+	assert.Equal(t, "2026-10-15T09:00:00Z", records[1][2])
+	assert.Equal(t, "80", records[1][3])
+	assert.Equal(t, "20", records[1][4])
+	assert.Equal(t, "24.69", records[1][5])
+	assert.Equal(t, "Inicio", records[1][6])
+
+	assert.Equal(t, "2026-11-15T09:00:00Z", records[2][2])
+	assert.Equal(t, "77", records[2][3])
+	assert.Equal(t, "18.5", records[2][4])
+	assert.Equal(t, "23.77", records[2][5])
+	assert.Equal(t, "Segundo control, buen avance", records[2][6])
+}
+
+// TestExportControlesPacienteCSVFiltroFechasYVacios verifica exportación sin controles, filtro por fechas y error 400 ante fechas inválidas.
+func TestExportControlesPacienteCSVFiltroFechasYVacios(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "CSV Filtro", Edad: 29, Peso: 70})
+	require.NoError(t, err)
+
+	t.Run("sin controles solo cabecera", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles/export", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		records, readErr := csv.NewReader(rec.Body).ReadAll()
+		require.NoError(t, readErr)
+		require.Len(t, records, 1)
+		assert.Equal(t, []string{"id", "paciente_id", "fecha", "peso", "porcentaje_grasa", "imc", "notas"}, records[0])
+	})
+
+	f1 := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	f2 := time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC)
+	_, err = repo.AddControl(context.Background(), creado.ID, models.ControlClinico{Fecha: f1, Peso: 70, PorcentajeGrasa: 20})
+	require.NoError(t, err)
+	_, err = repo.AddControl(context.Background(), creado.ID, models.ControlClinico{Fecha: f2, Peso: 68, PorcentajeGrasa: 19})
+	require.NoError(t, err)
+
+	t.Run("con filtro de fechas", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles/export?desde=2026-11-01", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		records, readErr := csv.NewReader(rec.Body).ReadAll()
+		require.NoError(t, readErr)
+		require.Len(t, records, 2)
+		assert.Equal(t, "2026-11-10T10:00:00Z", records[1][2])
+		assert.Equal(t, "", records[1][5])
+	})
+
+	t.Run("fecha invalida devuelve 400", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles/export?desde=invalida", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+}
+
+// TestExportControlesPacienteCSVNoEncontradoYSoftDeleted verifica 404 para paciente inexistente o eliminado lógicamente.
+func TestExportControlesPacienteCSVNoEncontradoYSoftDeleted(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Soft Del CSV", Edad: 30, Peso: 70})
+	require.NoError(t, err)
+	require.NoError(t, repo.Delete(context.Background(), creado.ID))
+
+	for _, id := range []string{"no-existe", creado.ID} {
+		req := httptest.NewRequest(http.MethodGet, "/pacientes/"+id+"/controles/export", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	}
 }
