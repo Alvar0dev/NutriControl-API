@@ -1,5 +1,31 @@
 # CHANGELOG.md
 
+## Versión 1.0.16 - 2026-11-20
+
+### Exportación CSV de controles clínicos (`GET /pacientes/:id/controles/export`) e inclusión de `altura` en `ExportPacientesCSV`
+
+- **Helpers compartidos en `handlers/paciente.go`**:
+  - `obtenerControlesFiltrados(c echo.Context, repo firestore.PacienteRepository)`: unifica la validación de ID (`400`), existencia de paciente activo (`404`), parseo y orden de fechas `?desde=&hasta=` (`400`) y filtrado cronológico inclusivo para `GetControlesPaciente` y `ExportControlesPacienteCSV`.
+  - `escribirCSV(c echo.Context, filename string, header []string, rows [][]string)`: centraliza la serialización RFC 4180 vía `encoding/csv`, las cabeceras `Content-Type: text/csv; charset=utf-8` y `Content-Disposition: attachment; filename="<filename>"`.
+- **Actualización de `ExportPacientesCSV` (`GET /pacientes/export`)**:
+  - Agrega `altura` como 7.ª columna (`id,nombre,edad,peso,porcentaje_grasa,notas,altura`), emitiendo cadena vacía `""` cuando `Altura <= 0` y formato decimal exacto (`strconv.FormatFloat(..., 'f', -1, 64)`) cuando existe.
+- **Nuevo endpoint `GET /pacientes/:id/controles/export` (`ExportControlesPacienteCSV`)**:
+  - Exporta en CSV RFC 4180 (`attachment; filename="controles.csv"`) el historial cronológico completo o filtrado por fechas (`?desde=&hasta=`) con columnas `id,paciente_id,fecha,peso,porcentaje_grasa,imc,notas` (`fecha` en `RFC3339` UTC e `imc` vacío cuando `<= 0`).
+  - Rutas `/pacientes/:id/controles/export` y `/pacientes/{id}/controles/export` registradas en `SetupRoutes` antes de `/pacientes/:id`.
+- **Tests en `handlers/paciente_test.go` (97 tests top-level en verde)**:
+  - Actualizados `TestExportPacientesCSVOK` y `TestExportPacientesCSVVacio` verificando la columna `altura` (vacía en seed y `"1.75"` cuando existe).
+  - Agregados `TestExportControlesPacienteCSVOK`, `TestExportControlesPacienteCSVFiltroFechasYVacios` y `TestExportControlesPacienteCSVNoEncontradoYSoftDeleted`.
+- `go test -count=1 ./...`, `go vet ./...`, `go build ./...` todos verdes.
+- Commit: `986116a feat: exportación CSV de controles clínicos y altura en ExportPacientesCSV`.
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Preservación de contratos posicionales al añadir `altura` en `ExportPacientesCSV`.** Insertar `altura` entre `peso` y `porcentaje_grasa` habría desplazado los índices de columna `4` y `5` en hojas de cálculo o consumidores CSV existentes. Al ubicar `altura` como 7.ª columna al final y emitir `""` cuando `Altura <= 0` (en coherencia con `omitempty` en JSON y evitando falsos `"0"` metros), se mantiene retrocompatibilidad posicional y claridad semántica.
+2. **Eliminación de duplicación entre listados y exportadores (`obtenerControlesFiltrados` y `escribirCSV`).** En lugar de copiar la lógica de `parseFechaQuery`, validación `400`/`404`, filtrado temporal y generación de `bytes.Buffer` + `csv.NewWriter`, se extrajeron ambos helpers compartidos. `obtenerControlesFiltrados` devuelve `(controles, status, errMsg)` sin escribir en el contexto HTTP para mantener explícito el flujo de errores en cada handler.
+3. **Seguridad en `Content-Disposition` y formato temporal determinista en CSV.** Interpolar el parámetro de ruta `id` dentro de `attachment; filename="controles-<id>.csv"` expondría la cabecera HTTP a manipulación si el cliente envía caracteres especiales; por ello se fijó el nombre estático `controles.csv` igual que `pacientes.csv`, formateando las fechas en `UTC().Format(time.RFC3339)` e `IMC == 0` como cadena vacía `""`.
+4. **Precedencia de ruta en Echo v4.** `/pacientes/:id/controles/export` se registró junto a `/pacientes/:id/controles/resumen` antes de `/pacientes/:id` para asegurar el match de sub-recursos profundos.
+
+---
 ## Versión 1.0.15 - 2026-11-19
 
 ### Filtrado por rango de fechas y paginación en `GET /pacientes/:id/controles`

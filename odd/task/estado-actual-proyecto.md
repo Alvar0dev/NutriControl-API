@@ -47,6 +47,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T26 | S1 | inline | done | `0660bf5` test: cubrir PacienteFirestoreRepo sobre gRPC in-process y Emulator |
 | T27 | S1 | inline | done | `e220d1c` feat: endpoint GET /pacientes/:id/controles/resumen evolutivo |
 | T28 | S1 | inline | done | `8f4cad4` feat: filtrado por fechas y paginación en GET /pacientes/:id/controles |
+| T29 | S1 | inline | done | `986116a` feat: exportación CSV de controles clínicos y altura en ExportPacientesCSV |
 
 ## Log
 
@@ -178,6 +179,16 @@ L28: [usuario] "Guarda todo el proceso en la documentacion con todas las dificul
 L28: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.15 (rango inclusivo `YYYY-MM-DD` hasta fin de día UTC, precedencia `404` vs `400`, paginación posterior al filtro sin afectar `GetResumenControlesPaciente`) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (3.2, 6.17 y dificultad 21), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
 - Commiteado y pusheado a `origin/main`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: Exportación CSV de controles clínicos e inclusión de `altura` en `ExportPacientesCSV`; Opción 2: Eliminar/editar control clínico puntual `PUT/DELETE /pacientes/:id/controles/:controlId`; Opción 3: Configuración host RDD).
+
+L29: [usuario] "haz el todo 1" (Exportación CSV de controles clínicos `GET /pacientes/:id/controles/export` e inclusión de `altura` en `ExportPacientesCSV`)
+L29: [asistente] Implementado test-first en `handlers/paciente.go` (`obtenerControlesFiltrados`, `escribirCSV`, actualización de `ExportPacientesCSV`, `ExportControlesPacienteCSV` y rutas `/pacientes/:id/controles/export` + `{id}/controles/export`) y `handlers/paciente_test.go` (actualizados `TestExportPacientesCSVOK` y `TestExportPacientesCSVVacio`; agregados `TestExportControlesPacienteCSVOK`, `TestExportControlesPacienteCSVFiltroFechasYVacios` y `TestExportControlesPacienteCSVNoEncontradoYSoftDeleted`, v1.0.16).
+- `go test -count=1 ./...` (97 tests top-level en verde), `go vet ./...` y `go build ./...` verdes. Commit `986116a`.
+
+L30: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L30: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.16 (`altura` al final en CSV preservando índices `0..5`, cadena vacía `""` cuando falta `altura`/`imc`, extracción de `obtenerControlesFiltrados` y `escribirCSV`, filename estático `controles.csv` por seguridad en cabeceras HTTP y precedencia de ruta en Echo v4) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (3.2, 6.18 y dificultad 22), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Commiteado y pusheado a `origin/main`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: Edición y eliminación de controles clínicos puntuales `PUT/DELETE /pacientes/:id/controles/:controlId`; Opción 2: Pipeline CI en GitHub Actions con `go test -race ./...`, `go vet` y `go build`; Opción 3: Configuración host RDD).
+
 
 
 

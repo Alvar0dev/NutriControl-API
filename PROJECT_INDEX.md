@@ -75,6 +75,7 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | POST | `/pacientes/{id}/restore` | RestorePaciente | Restore | 200 OK `Paciente` / 404 |
 | GET | `/pacientes/{id}/controles` | GetControlesPaciente | GetByID + GetControles + filtro `?desde=&hasta=` y paginación `?limit=&offset=` | 200 OK `[ControlClinico]` / 400 / 404 |
 | GET | `/pacientes/{id}/controles/resumen` | GetResumenControlesPaciente | GetByID + GetControles | 200 OK `ResumenControles` / 404 |
+| GET | `/pacientes/{id}/controles/export` | ExportControlesPacienteCSV | GetByID + GetControles + filtro `?desde=&hasta=` | 200 OK `text/csv` (`attachment; filename="controles.csv"`) / 400 / 404 |
 | POST | `/pacientes/{id}/controles` | CreateControlPaciente | AddControl | 201 Created `ControlClinico` / 400 / 404 |
 | GET | `/pacientes/search` | SearchPacientes | GetAll(ctx, limit, offset) + filtro en memoria | 200 OK `[Paciente]` paginado |
 | GET | `/pacientes/stats` | StatsPacientes | GetAll(ctx, limit, offset) + agregación en memoria | 200 OK `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` |
@@ -175,7 +176,7 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` soft delete por ID), restauración y listado de inactivos (`POST /pacientes/:id/restore`, `GET /pacientes/inactivos`), historial con filtro temporal y paginación + resumen evolutivo de controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/resumen`), `GET /health`, cálculo de IMC (`GET /pacientes/imc/{id}` y `/pacientes/{id}/imc`), reporte analítico (`GET /pacientes/reporte`), alta masiva (`POST /pacientes/batch`), filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100, `altura` 0.30-2.50m) y normalización de nombres. |
+| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` soft delete por ID), restauración y listado de inactivos (`POST /pacientes/:id/restore`, `GET /pacientes/inactivos`), historial con filtro temporal y paginación + resumen evolutivo + exportación CSV de controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/resumen`, `GET /pacientes/:id/controles/export`), `GET /health`, cálculo de IMC (`GET /pacientes/imc/{id}` y `/pacientes/{id}/imc`), reporte analítico (`GET /pacientes/reporte`), alta masiva (`POST /pacientes/batch`), filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV con `altura` (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100, `altura` 0.30-2.50m) y normalización de nombres. |
 | Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). |
 | Build | `go build ./...` y `go vet ./...` OK. |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
@@ -324,7 +325,15 @@ go vet ./...                     # Verificación estándar
 - Tests: `TestGetControlesPacienteFiltroFechas`, `TestGetControlesPacienteFiltroFechasInvalidas` y `TestGetControlesPacientePaginacion` (94 tests top-level en verde).
 - Commit: `8f4cad4 feat: filtrado por fechas y paginación en GET /pacientes/:id/controles`.
 
-### 6.18 Dificultades acumuladas y decisiones de diseño
+### 6.18 Feature: Exportación CSV de controles clínicos y columna `altura` en `ExportPacientesCSV` (v1.0.16)
+
+- Refactorización con helpers compartidos `obtenerControlesFiltrados` (compartido por `GetControlesPaciente` y `ExportControlesPacienteCSV`) y `escribirCSV` (escritura RFC 4180 compartida entre exportadores).
+- `ExportPacientesCSV` (`GET /pacientes/export`): incorpora `altura` como 7.ª columna (`""` si no está registrada).
+- `ExportControlesPacienteCSV` (`GET /pacientes/:id/controles/export`): exporta controles cronológicos (`id,paciente_id,fecha,peso,porcentaje_grasa,imc,notas`) con soporte de filtro `?desde=&hasta=` y cabecera `attachment; filename="controles.csv"`.
+- Tests: actualizados `TestExportPacientesCSVOK` y `TestExportPacientesCSVVacio`; agregados `TestExportControlesPacienteCSVOK`, `TestExportControlesPacienteCSVFiltroFechasYVacios` y `TestExportControlesPacienteCSVNoEncontradoYSoftDeleted` (97 tests top-level en verde).
+- Commit: `986116a feat: exportación CSV de controles clínicos y altura en ExportPacientesCSV`.
+
+### 6.19 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -347,6 +356,7 @@ go vet ./...                     # Verificación estándar
 19. **Cierre de cobertura de `PacienteFirestoreRepo` mediante gRPC in-process y `FIRESTORE_EMULATOR_HOST`**: la brecha detectada en v1.0.13 (`Risk: item 6`) se resolvió con `fakeFirestoreServer` sobre `firestorepb` (`Commit`, `BatchGetDocuments`, `RunQuery`) conectado a `*firestore.Client` por loopback (`81.9%` de cobertura en `pkg/firestore`), y condicionando `option.WithEndpoint` en `NewPacienteFirestoreRepo` para respetar `FIRESTORE_EMULATOR_HOST`.
 20. **Deltas evolutivos seguros y fechas opcionales en `GET /pacientes/:id/controles/resumen`**: `GetResumenControlesPaciente` usa `redondear2` para evitar deriva IEEE 754 en las restas, calcula `delta_imc` solo cuando primer y último control poseen `IMC > 0`, y emplea `*time.Time` con `omitempty` en `fecha_inicio`/`fecha_fin` para no serializar fechas cero cuando el paciente aún no tiene controles.
 21. **Rango de fechas inclusivo `YYYY-MM-DD` y paginación posterior al filtrado en `GET /pacientes/:id/controles`**: `parseFechaQuery` extiende `hasta` en formato `YYYY-MM-DD` a `23:59:59.999999999 UTC` para no omitir controles del último día, rechaza explícitamente rangos invertidos con `400 Bad Request` y aplica `paginacionDesdeQuery` tras filtrar por fechas sin alterar el acceso directo al historial completo en `GetResumenControlesPaciente`.
+22. **Columna `altura` al final en CSV y seguridad de cabeceras en `ExportControlesPacienteCSV`**: agregar `altura` como 7.ª columna en `ExportPacientesCSV` (emitiendo `""` cuando `Altura <= 0`) evita romper índices `0..5` existentes; extraer `obtenerControlesFiltrados` y `escribirCSV` elimina código duplicado, y usar el nombre estático `controles.csv` en `Content-Disposition` previene inyección de cabeceras vía parámetro `id`.
 
 ## 7. Convenciones de entrega
 

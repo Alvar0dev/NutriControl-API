@@ -37,11 +37,13 @@
 - [done] Opción 2: Documentar dificultades y decisiones de diseño v1.0.14 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
 - [done] Opción 1: Filtrado por rango de fechas (?desde=&hasta=) y paginación (?limit=&offset=) en GET /pacientes/:id/controles (v1.0.15) (commit 8f4cad4)
 - [done] Documentar dificultades y decisiones de diseño v1.0.15 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
-- [pending] Opción 1: Exportación CSV del historial de controles clínicos (GET /pacientes/:id/controles/export) e inclusión de altura en ExportPacientesCSV
-- [pending] Opción 2: Edición y eliminación de controles clínicos puntuales (PUT/DELETE /pacientes/:id/controles/:controlId)
+- [done] Opción 1: Exportación CSV del historial de controles clínicos (GET /pacientes/:id/controles/export) e inclusión de altura en ExportPacientesCSV (v1.0.16) (commit 986116a)
+- [done] Documentar dificultades y decisiones de diseño v1.0.16 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
+- [pending] Opción 1: Edición y eliminación de controles clínicos puntuales (PUT/DELETE /pacientes/:id/controles/:controlId)
+- [pending] Opción 2: Pipeline CI en GitHub Actions (.github/workflows/ci.yml con go test -race, go vet y go build)
 - [pending] Opción 3: Asignar modelo a lente review-readability en models.json si se desea reactivar RDD
 
-=== Estado actual (2026-11-19) ===
+=== Estado actual (2026-11-20) ===
 
-Estado git: rama main sincronizada con origin/main (94 tests top-level en verde, go vet y go build OK).
-Pendientes: Opción 1 (exportación CSV de controles y altura), Opción 2 (edición/borrado de control clínico) y Opción 3 (host RDD).
+Estado git: rama main sincronizada con origin/main (97 tests top-level en verde, go vet y go build OK).
+Pendientes: Opción 1 (edición/borrado de control clínico), Opción 2 (CI GitHub Actions) y Opción 3 (host RDD).
