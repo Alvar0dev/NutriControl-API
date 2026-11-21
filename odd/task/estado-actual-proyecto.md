@@ -48,6 +48,8 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T27 | S1 | inline | done | `e220d1c` feat: endpoint GET /pacientes/:id/controles/resumen evolutivo |
 | T28 | S1 | inline | done | `8f4cad4` feat: filtrado por fechas y paginación en GET /pacientes/:id/controles |
 | T29 | S1 | inline | done | `986116a` feat: exportación CSV de controles clínicos y altura en ExportPacientesCSV |
+| T30 | S1 | inline | done | `027f1af` feat: edición y eliminación de controles clínicos puntuales |
+| T31 | S1 | inline | done | `b3df81f` ci: agregar workflow de GitHub Actions con vet, test -race y build |
 
 ## Log
 
@@ -188,6 +190,16 @@ L30: [usuario] "Guarda todo el proceso en la documentacion con todas las dificul
 L30: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.16 (`altura` al final en CSV preservando índices `0..5`, cadena vacía `""` cuando falta `altura`/`imc`, extracción de `obtenerControlesFiltrados` y `escribirCSV`, filename estático `controles.csv` por seguridad en cabeceras HTTP y precedencia de ruta en Echo v4) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (3.2, 6.18 y dificultad 22), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
 - Commiteado y pusheado a `origin/main`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: Edición y eliminación de controles clínicos puntuales `PUT/DELETE /pacientes/:id/controles/:controlId`; Opción 2: Pipeline CI en GitHub Actions con `go test -race ./...`, `go vet` y `go build`; Opción 3: Configuración host RDD).
+
+L31: [usuario] "haz los 3"
+L31: [asistente] Implementadas test-first la Opción 1 (`027f1af`) y la Opción 2 (`b3df81f`), y verificado el bloqueo externo de la Opción 3 (v1.0.17):
+- Opción 1 (`027f1af`): agregado `ErrControlNoEncontrado`, `UpdateControl` y `DeleteControl` en `PacienteRepository`, `MockPacienteRepository` y `PacienteFirestoreRepo` (`obtenerControlExistente` con `codes.NotFound`/`!doc.Exists()`), `go mod tidy`, helpers `validarControlClinico`/`calcularIMCControl`, handlers `UpdateControlPaciente` (`200 OK` recalculando IMC y preservando `Fecha` si es cero) y `DeleteControlPaciente` (`204 No Content`), rutas en `SetupRoutes`, y 6 tests nuevos en `handlers/paciente_test.go`, `pkg/firestore/mock_test.go` y `pkg/firestore/repo_test.go` (`103` tests top-level en verde).
+- Opción 2 (`b3df81f`): creado `.github/workflows/ci.yml` (`ubuntu-latest`, `permissions: contents: read`, `go vet`, `go test -race -count=1 ./...`, `go build ./...`); verificación independiente read-only `PASS` (riesgo ítem 5).
+- Opción 3 (bloqueada / fuera de alcance): constatado en solo lectura que `C:\Users\alvar\.pi\agent\models.json` solo declara `providers` (`strata`, `ollama`) sin lentes RDD y que la configuración de agente/host es externa al repositorio.
+
+L32: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L32: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.17 (`ErrControlNoEncontrado` vs errores internos `500`, preservación de `Fecha` histórica en `PUT` cuando se omite, eliminación de duplicación en helpers compartidos, limitación local de `go test -race` en Windows sin CGO/`gcc` vs runner Linux de CI, y bloqueo externo de `review-readability` en host) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (2, 3.2, 4.1, 6, 6.19 y dificultades 23-26 en 6.20), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: Hardening HTTP y ciclo de vida en `main.go` — `PORT` env var, middlewares `Logger`/`Recover`, timeouts y `graceful shutdown`; Opción 2: Consulta puntual `GET /pacientes/:id/controles/:controlId` o actualización parcial `PATCH /pacientes/:id/controles/:controlId`; Opción 3: Verificación del workflow CI `-race` en GitHub Actions y configuración manual de RDD en el host si se desea reactivar).
 
 
 

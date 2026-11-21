@@ -16,6 +16,9 @@ Mapa de navegación, comandos de desarrollo y estado actual del proyecto. No ree
 
 ```
 nutricontrol/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                 # CI en GitHub Actions (vet, test -race, build).
 ├── main.go                        # Entry point. Setup de Echo + inyección repo.
 ├── go.mod / go.sum                # Módulo `nutricontrol`.
 ├── PROJECT_INDEX.md               # ESTE archivo: navegación, comandos, estado.
@@ -33,7 +36,8 @@ nutricontrol/
 │       ├── paciente_repo.go       # Interfaz PacienteRepository.
 │       ├── repo.go                # Impl Firestore real.
 │       ├── mock.go                # Impl mock en memoria.
-│       └── mock_test.go           # Tests unitarios del mock.
+│       ├── mock_test.go           # Tests unitarios del mock.
+│       └── repo_test.go           # Tests Firestore sobre gRPC in-process / Emulator.
 ├── docs/
 │   ├── constitution.md            # Principios innegociables (hexagonal, testing, minimalismo).
 │   ├── CHANGELOG.md               # Historia de cambios contractuales.
@@ -77,6 +81,8 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | GET | `/pacientes/{id}/controles/resumen` | GetResumenControlesPaciente | GetByID + GetControles | 200 OK `ResumenControles` / 404 |
 | GET | `/pacientes/{id}/controles/export` | ExportControlesPacienteCSV | GetByID + GetControles + filtro `?desde=&hasta=` | 200 OK `text/csv` (`attachment; filename="controles.csv"`) / 400 / 404 |
 | POST | `/pacientes/{id}/controles` | CreateControlPaciente | AddControl | 201 Created `ControlClinico` / 400 / 404 |
+| PUT | `/pacientes/{id}/controles/{controlId}` | UpdateControlPaciente | UpdateControl | 200 OK `ControlClinico` / 400 / 404 |
+| DELETE | `/pacientes/{id}/controles/{controlId}` | DeleteControlPaciente | DeleteControl | 204 No Content / 404 |
 | GET | `/pacientes/search` | SearchPacientes | GetAll(ctx, limit, offset) + filtro en memoria | 200 OK `[Paciente]` paginado |
 | GET | `/pacientes/stats` | StatsPacientes | GetAll(ctx, limit, offset) + agregación en memoria | 200 OK `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` |
 | GET | `/pacientes/reporte` | ReportePacientes | GetAll(ctx, 0, 0) + agregación demográfica y nutricional | 200 OK `RespuestaReporte` `{total, grupos_etarios, clasificacion_imc, promedios}` |
@@ -96,6 +102,8 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 ### 4.1 Puerto `PacienteRepository` — `pkg/firestore/paciente_repo.go`
 
 ```go
+var ErrControlNoEncontrado = errors.New("control clínico no encontrado")
+
 type PacienteRepository interface {
     Create(ctx context.Context, p models.Paciente) (*models.Paciente, error)
     GetAll(ctx context.Context, limit, offset int) ([]models.Paciente, error)
@@ -106,6 +114,8 @@ type PacienteRepository interface {
     GetInactivos(ctx context.Context) ([]models.Paciente, error)
     AddControl(ctx context.Context, pacienteID string, control models.ControlClinico) (*models.ControlClinico, error)
     GetControles(ctx context.Context, pacienteID string) ([]models.ControlClinico, error)
+    UpdateControl(ctx context.Context, pacienteID, controlID string, control models.ControlClinico) (*models.ControlClinico, error)
+    DeleteControl(ctx context.Context, pacienteID, controlID string) error
 }
 ```
 
@@ -176,9 +186,9 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` soft delete por ID), restauración y listado de inactivos (`POST /pacientes/:id/restore`, `GET /pacientes/inactivos`), historial con filtro temporal y paginación + resumen evolutivo + exportación CSV de controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/resumen`, `GET /pacientes/:id/controles/export`), `GET /health`, cálculo de IMC (`GET /pacientes/imc/{id}` y `/pacientes/{id}/imc`), reporte analítico (`GET /pacientes/reporte`), alta masiva (`POST /pacientes/batch`), filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV con `altura` (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100, `altura` 0.30-2.50m) y normalización de nombres. |
-| Tests | `go test ./...` verde (`handlers`, `models`, `pkg/firestore`). |
-| Build | `go build ./...` y `go vet ./...` OK. |
+| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` soft delete por ID), restauración y listado de inactivos (`POST /pacientes/:id/restore`, `GET /pacientes/inactivos`), historial completo de controles clínicos (`GET/POST /pacientes/:id/controles`, `PUT/DELETE /pacientes/:id/controles/:controlId`, `GET /pacientes/:id/controles/resumen`, `GET /pacientes/:id/controles/export`), `GET /health`, cálculo de IMC (`GET /pacientes/imc/{id}` y `/pacientes/{id}/imc`), reporte analítico (`GET /pacientes/reporte`), alta masiva (`POST /pacientes/batch`), filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV con `altura` (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100, `altura` 0.30-2.50m) y normalización de nombres. |
+| Tests | `go test -count=1 ./...` verde (103 tests top-level en `handlers`, `models`, `pkg/firestore`). |
+| Build / CI | `go build ./...` y `go vet ./...` OK. Workflow CI `.github/workflows/ci.yml` (`go vet`, `go test -race`, `go build`). |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente. `feature-c4-search.md` y `feature-b-paginacion-firestore.md` archivados en `odd/tasks/archive/`. |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
@@ -333,7 +343,19 @@ go vet ./...                     # Verificación estándar
 - Tests: actualizados `TestExportPacientesCSVOK` y `TestExportPacientesCSVVacio`; agregados `TestExportControlesPacienteCSVOK`, `TestExportControlesPacienteCSVFiltroFechasYVacios` y `TestExportControlesPacienteCSVNoEncontradoYSoftDeleted` (97 tests top-level en verde).
 - Commit: `986116a feat: exportación CSV de controles clínicos y altura en ExportPacientesCSV`.
 
-### 6.19 Dificultades acumuladas y decisiones de diseño
+### 6.19 Feature: Edición/eliminación puntual de controles clínicos y pipeline CI (v1.0.17)
+
+- **Edición y eliminación puntual de controles (`PUT/DELETE /pacientes/:id/controles/:controlId`)**:
+  - `pkg/firestore/paciente_repo.go`: nuevo error centinela `ErrControlNoEncontrado` y métodos `UpdateControl` y `DeleteControl` en `PacienteRepository`.
+  - `pkg/firestore/mock.go` y `pkg/firestore/repo.go`: paridad completa verificando paciente activo (`DeletedAt == nil`), preservando `Fecha` original si llega en cero en `PUT`, aislando controles por paciente y traduciendo `codes.NotFound`/`!doc.Exists()` a `ErrControlNoEncontrado` mediante `obtenerControlExistente`.
+  - `handlers/paciente.go`: helpers compartidos `validarControlClinico` y `calcularIMCControl` (reutilizados entre `POST` y `PUT`), handlers `UpdateControlPaciente` (`200 OK` con recálculo de IMC) y `DeleteControlPaciente` (`204 No Content`), y registro en `SetupRoutes`.
+  - Tests: `TestUpdateControlPacienteOK`, `TestUpdateControlPacienteErrores`, `TestDeleteControlPacienteOK`, `TestDeleteControlPacienteErrores` (`handlers/paciente_test.go`), `TestMockUpdateYDeleteControl` (`pkg/firestore/mock_test.go`) y `TestFirestoreRepoUpdateYDeleteControl` (`pkg/firestore/repo_test.go`) — 103 tests top-level en verde.
+  - Commit: `027f1af feat: edición y eliminación de controles clínicos puntuales`.
+- **Pipeline CI en GitHub Actions (`.github/workflows/ci.yml`)**:
+  - Ejecuta `go vet ./...`, `go test -race -count=1 ./...` y `go build ./...` en `ubuntu-latest` ante `push`/`pull_request` sobre `main` con permisos `contents: read`.
+  - Commit: `b3df81f ci: agregar workflow de GitHub Actions con vet, test -race y build`.
+
+### 6.20 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -357,6 +379,10 @@ go vet ./...                     # Verificación estándar
 20. **Deltas evolutivos seguros y fechas opcionales en `GET /pacientes/:id/controles/resumen`**: `GetResumenControlesPaciente` usa `redondear2` para evitar deriva IEEE 754 en las restas, calcula `delta_imc` solo cuando primer y último control poseen `IMC > 0`, y emplea `*time.Time` con `omitempty` en `fecha_inicio`/`fecha_fin` para no serializar fechas cero cuando el paciente aún no tiene controles.
 21. **Rango de fechas inclusivo `YYYY-MM-DD` y paginación posterior al filtrado en `GET /pacientes/:id/controles`**: `parseFechaQuery` extiende `hasta` en formato `YYYY-MM-DD` a `23:59:59.999999999 UTC` para no omitir controles del último día, rechaza explícitamente rangos invertidos con `400 Bad Request` y aplica `paginacionDesdeQuery` tras filtrar por fechas sin alterar el acceso directo al historial completo en `GetResumenControlesPaciente`.
 22. **Columna `altura` al final en CSV y seguridad de cabeceras en `ExportControlesPacienteCSV`**: agregar `altura` como 7.ª columna en `ExportPacientesCSV` (emitiendo `""` cuando `Altura <= 0`) evita romper índices `0..5` existentes; extraer `obtenerControlesFiltrados` y `escribirCSV` elimina código duplicado, y usar el nombre estático `controles.csv` en `Content-Disposition` previene inyección de cabeceras vía parámetro `id`.
+23. **Separación entre `404` de dominio y `500` de infraestructura en controles puntuales**: definir `ErrControlNoEncontrado` en `pkg/firestore` y traducir únicamente `codes.NotFound` o `!doc.Exists()` en `obtenerControlExistente` permite a `UpdateControlPaciente` y `DeleteControlPaciente` usar `errors.Is` para responder `404` sin ocultar fallos reales de red/Firestore tras falsos `404`.
+24. **Preservación de fecha histórica en `PUT /pacientes/:id/controles/:controlId`**: cuando el cliente edita peso, grasa o notas omitiendo `fecha` (`control.Fecha.IsZero()`), ambos adaptadores conservan `existing.Fecha` en vez de pisarla con `0001-01-01` o `time.Now()`, evitando corromper el orden cronológico y `GetResumenControlesPaciente`.
+25. **Limitación local de `-race` en Windows y validación en CI Linux**: `go test -race` requiere CGO/`gcc`, ausente en este entorno Windows; por ello `.github/workflows/ci.yml` corre en `ubuntu-latest` y `go.mod` fue actualizado con `go mod tidy` para declarar `google.golang.org/grpc` y `google.golang.org/protobuf` como dependencias directas.
+26. **Bloqueo externo de Opción 3 (`review-readability` en `models.json`)**: se constató que `C:\Users\alvar\.pi\agent\models.json` solo configura `providers` (`strata`/`ollama`) y carece de claves de lentes RDD; al pertenecer a configuración externa del host fuera del repositorio, queda documentado como ajuste manual del entorno RDD.
 
 ## 7. Convenciones de entrega
 

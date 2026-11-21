@@ -1,5 +1,36 @@
 # CHANGELOG.md
 
+## Versión 1.0.17 - 2026-11-21
+
+### Edición y eliminación de controles clínicos puntuales (`PUT/DELETE /pacientes/:id/controles/:controlId`) y pipeline CI en GitHub Actions
+
+- **Puerto y adaptadores (`pkg/firestore/`)**:
+  - Definido el error centinela `ErrControlNoEncontrado` y los métodos `UpdateControl` y `DeleteControl` en `PacienteRepository` (`pkg/firestore/paciente_repo.go`).
+  - `MockPacienteRepository` (`pkg/firestore/mock.go`): valida paciente activo (`GetByID`), aplica protección `nil`-safe sobre `m.controles`, aísla controles por `pacienteID`, conserva la `Fecha` original cuando se envía fecha cero y actualiza o elimina el elemento correspondiente.
+  - `PacienteFirestoreRepo` (`pkg/firestore/repo.go`): extrae el helper `obtenerControlExistente` para verificar paciente activo y existencia del documento en `pacientes/{id}/controles/{controlId}`, mapeando `codes.NotFound` / `!doc.Exists()` a `ErrControlNoEncontrado` y ejecutando `Set` o `Delete` sobre la referencia.
+  - `go mod tidy` promovió `google.golang.org/grpc` y `google.golang.org/protobuf` a `require` directo en `go.mod` por el uso directo de `grpc/codes` y `grpc/status` en `repo.go`.
+- **Handlers HTTP y rutas (`handlers/paciente.go`)**:
+  - Extraídos los helpers compartidos `validarControlClinico` y `calcularIMCControl` (reutilizados por `CreateControlPaciente` y `UpdateControlPaciente`).
+  - `UpdateControlPaciente` (`PUT /pacientes/:id/controles/:controlId`): valida paciente activo (`404`), valida peso (`>0 && <=500`) y porcentaje de grasa (`0-100`) (`400`), recalcula el `IMC` usando `paciente.Altura` actual y devuelve `200 OK` (`404` si el control no existe o pertenece a otro paciente).
+  - `DeleteControlPaciente` (`DELETE /pacientes/:id/controles/:controlId`): valida paciente activo y existencia del control, devolviendo `204 No Content` (`404` si no existe o está aislado en otro paciente).
+  - Rutas registradas en `SetupRoutes` con ambas sintaxis (`:id`/`:controlId` y `{id}`/`{controlId}`) antes de `/pacientes/:id`.
+- **Pipeline CI (`.github/workflows/ci.yml`)**:
+  - Workflow en `ubuntu-latest` activado en `push` y `pull_request` sobre `main`, con permisos mínimos (`contents: read`), `actions/checkout@v4`, `actions/setup-go@v5` (`go-version-file: go.mod`) y ejecución secuencial de `go vet ./...`, `go test -race -count=1 ./...` y `go build ./...`.
+- **Tests (`handlers/paciente_test.go`, `pkg/firestore/mock_test.go`, `pkg/firestore/repo_test.go`)**:
+  - Agregados `TestUpdateControlPacienteOK`, `TestUpdateControlPacienteErrores`, `TestDeleteControlPacienteOK`, `TestDeleteControlPacienteErrores`, `TestMockUpdateYDeleteControl` y `TestFirestoreRepoUpdateYDeleteControl` (103 tests top-level en verde).
+- **Opción 3 (lente `review-readability` en `models.json`)**:
+  - Verificado en solo lectura que `C:\Users\alvar\.pi\agent\models.json` únicamente declara `providers` (`strata` y `ollama`) sin configuración de lentes RDD; además, editar configuración externa de agente/host queda fuera del alcance del repositorio (acción manual en el host RDD si se decide reactivar).
+- Commits: `027f1af` (`feat: edición y eliminación de controles clínicos puntuales`) y `b3df81f` (`ci: agregar workflow de GitHub Actions con vet, test -race y build`).
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Diferenciación precisa entre `404 Not Found` y errores internos `500` en Firestore.** Si el handler interpretara cualquier error devuelto por `UpdateControl` o `DeleteControl` como `404`, un fallo transitorio de red o permisos en Firestore se ocultaría como "control no encontrado". Al introducir `ErrControlNoEncontrado` en `pkg/firestore` y traducir únicamente `codes.NotFound` o `!doc.Exists()` en `obtenerControlExistente`, los handlers usan `errors.Is(err, firestore.ErrControlNoEncontrado)` para responder `404` y propagan cualquier otro error como `500`.
+2. **Preservación de la fecha histórica cuando `PUT` omite el campo `fecha`.** En `ControlClinico`, `Fecha` es `time.Time` (valor cero `0001-01-01` si se omite en JSON). A diferencia de `POST` (donde omitir `fecha` asigna `time.Now().UTC()`), sobrescribir un control existente con la fecha cero o con la fecha actual al corregir un peso histórico distorsionaría el orden cronológico y el resumen evolutivo. Por ello, tanto `MockPacienteRepository` como `PacienteFirestoreRepo` leen el control previo y conservan `existing.Fecha` cuando `control.Fecha.IsZero()`, mientras recalculan siempre `IMC` con la altura vigente del paciente.
+3. **Eliminación de duplicación entre alta y edición de controles (`validarControlClinico`, `calcularIMCControl` y `obtenerControlExistente`).** Para evitar divergencias en las cotas clínicas o el redondeo del IMC entre `POST` y `PUT`, y entre `UpdateControl` y `DeleteControl` en `repo.go`, se centralizó la lógica compartida en helpers privados manteniendo el contrato público inalterado.
+4. **Limitación local de `go test -race` en Windows y descarga al runner Linux de CI.** Al ejecutar `go test -race -count=1 ./...` localmente en Windows falló por falta de `gcc`/CGO en `PATH` (`go: -race requires cgo`). El workflow `.github/workflows/ci.yml` sobre `ubuntu-latest` resuelve esa cobertura con detector de carreras en cada `push` y `pull_request`, complementado por un bloqueo `sync.Mutex` verificado en `fakeFirestoreServer` y ausencia de estado compartido mutable en `handlers` y tests del mock.
+5. **Alcance de configuración externa RDD (`review-readability`).** La clave no existe dentro del proyecto ni en el esquema de proveedores de `models.json` del agente Pi local (`providers.strata`/`ollama`), por lo que queda documentada como ajuste manual exclusivo del entorno RDD del host para respetar los límites del repositorio.
+
+---
 ## Versión 1.0.16 - 2026-11-20
 
 ### Exportación CSV de controles clínicos (`GET /pacientes/:id/controles/export`) e inclusión de `altura` en `ExportPacientesCSV`
