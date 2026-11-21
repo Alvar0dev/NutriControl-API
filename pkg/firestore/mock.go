@@ -156,3 +156,43 @@ func (m *MockPacienteRepository) GetControles(ctx context.Context, pacienteID st
 	})
 	return res, nil
 }
+
+// UpdateControl actualiza un control clínico existente de un paciente activo en el mock.
+// Si control.Fecha es cero, conserva la fecha original del control.
+func (m *MockPacienteRepository) UpdateControl(ctx context.Context, pacienteID, controlID string, control models.ControlClinico) (*models.ControlClinico, error) {
+	if _, err := m.GetByID(ctx, pacienteID); err != nil {
+		return nil, err
+	}
+	if m.controles != nil {
+		for i, existing := range m.controles[pacienteID] {
+			if existing.ID == controlID {
+				if control.Fecha.IsZero() {
+					control.Fecha = existing.Fecha
+				}
+				control.ID = controlID
+				control.PacienteID = pacienteID
+				m.controles[pacienteID][i] = control
+				copia := control
+				return &copia, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("%w con ID %s", ErrControlNoEncontrado, controlID)
+}
+
+// DeleteControl elimina un control clínico puntual de un paciente activo en el mock.
+func (m *MockPacienteRepository) DeleteControl(ctx context.Context, pacienteID, controlID string) error {
+	if _, err := m.GetByID(ctx, pacienteID); err != nil {
+		return err
+	}
+	if m.controles != nil {
+		lista := m.controles[pacienteID]
+		for i, existing := range lista {
+			if existing.ID == controlID {
+				m.controles[pacienteID] = append(lista[:i], lista[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%w con ID %s", ErrControlNoEncontrado, controlID)
+}

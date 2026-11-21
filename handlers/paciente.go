@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -581,6 +582,25 @@ func GetPacientesInactivos(c echo.Context, repo firestore.PacienteRepository) er
 	return c.JSON(http.StatusOK, inactivos)
 }
 
+// validarControlClinico verifica que peso y porcentaje_grasa del control estén en los rangos clínicos permitidos.
+func validarControlClinico(control models.ControlClinico) error {
+	if control.Peso <= 0 || control.Peso > pesoMaximo {
+		return fmt.Errorf("El campo 'peso' debe ser mayor que 0 y menor o igual a %d", pesoMaximo)
+	}
+	if control.PorcentajeGrasa < 0 || control.PorcentajeGrasa > porcentajeGrasaMaximo {
+		return fmt.Errorf("El campo 'porcentaje_grasa' debe estar entre 0 y %d", porcentajeGrasaMaximo)
+	}
+	return nil
+}
+
+// calcularIMCControl calcula el IMC redondeado a 2 decimales cuando el paciente tiene altura válida.
+func calcularIMCControl(peso, altura float64) float64 {
+	if altura > 0 {
+		return redondear2(peso / (altura * altura))
+	}
+	return 0
+}
+
 // CreateControlPaciente registra un control clínico periódico para un paciente activo,
 // calculando automáticamente el IMC si el paciente tiene altura registrada.
 func CreateControlPaciente(c echo.Context, repo firestore.PacienteRepository) error {
@@ -600,15 +620,8 @@ func CreateControlPaciente(c echo.Context, repo firestore.PacienteRepository) er
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 
-	if control.Peso <= 0 || control.Peso > pesoMaximo {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("El campo 'peso' debe ser mayor que 0 y menor o igual a %d", pesoMaximo),
-		})
-	}
-	if control.PorcentajeGrasa < 0 || control.PorcentajeGrasa > porcentajeGrasaMaximo {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("El campo 'porcentaje_grasa' debe estar entre 0 y %d", porcentajeGrasaMaximo),
-		})
+	if err := validarControlClinico(*control); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
 	control.ID = ""
@@ -616,17 +629,73 @@ func CreateControlPaciente(c echo.Context, repo firestore.PacienteRepository) er
 	if control.Fecha.IsZero() {
 		control.Fecha = time.Now().UTC()
 	}
-	if paciente.Altura > 0 {
-		control.IMC = math.Round((control.Peso/(paciente.Altura*paciente.Altura))*100) / 100
-	} else {
-		control.IMC = 0
-	}
+	control.IMC = calcularIMCControl(control.Peso, paciente.Altura)
 
 	creado, err := repo.AddControl(ctx, id, *control)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al registrar control clínico"})
 	}
 	return c.JSON(http.StatusCreated, creado)
+}
+
+// UpdateControlPaciente edita un control clínico puntual de un paciente activo,
+// recalculando automáticamente el IMC según la altura actual del paciente.
+func UpdateControlPaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	controlID := c.Param("controlId")
+	if id == "" || controlID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Los campos 'id' y 'controlId' son requeridos"})
+	}
+
+	ctx := c.Request().Context()
+	paciente, err := repo.GetByID(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+
+	control := new(models.ControlClinico)
+	if err := c.Bind(control); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+
+	if err := validarControlClinico(*control); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	control.ID = controlID
+	control.PacienteID = id
+	control.IMC = calcularIMCControl(control.Peso, paciente.Altura)
+
+	actualizado, err := repo.UpdateControl(ctx, id, controlID, *control)
+	if err != nil {
+		if errors.Is(err, firestore.ErrControlNoEncontrado) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró control clínico con ID " + controlID})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al actualizar control clínico"})
+	}
+	return c.JSON(http.StatusOK, actualizado)
+}
+
+// DeleteControlPaciente elimina un control clínico puntual perteneciente a un paciente activo.
+func DeleteControlPaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	controlID := c.Param("controlId")
+	if id == "" || controlID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Los campos 'id' y 'controlId' son requeridos"})
+	}
+
+	ctx := c.Request().Context()
+	if _, err := repo.GetByID(ctx, id); err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+
+	if err := repo.DeleteControl(ctx, id, controlID); err != nil {
+		if errors.Is(err, firestore.ErrControlNoEncontrado) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró control clínico con ID " + controlID})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al eliminar control clínico"})
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // parseFechaQuery parsea una fecha de query param en formato RFC3339 o YYYY-MM-DD.
@@ -1062,6 +1131,18 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.POST("/pacientes/{id}/controles", func(c echo.Context) error {
 		return CreateControlPaciente(c, repo)
+	})
+	e.PUT("/pacientes/:id/controles/:controlId", func(c echo.Context) error {
+		return UpdateControlPaciente(c, repo)
+	})
+	e.PUT("/pacientes/{id}/controles/{controlId}", func(c echo.Context) error {
+		return UpdateControlPaciente(c, repo)
+	})
+	e.DELETE("/pacientes/:id/controles/:controlId", func(c echo.Context) error {
+		return DeleteControlPaciente(c, repo)
+	})
+	e.DELETE("/pacientes/{id}/controles/{controlId}", func(c echo.Context) error {
+		return DeleteControlPaciente(c, repo)
 	})
 	e.GET("/pacientes/:id", func(c echo.Context) error {
 		return GetPacienteByID(c, repo)

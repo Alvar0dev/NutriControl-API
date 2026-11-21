@@ -2,6 +2,7 @@ package firestore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -182,4 +183,60 @@ func TestMockAddYGetControles(t *testing.T) {
 	assert.Error(t, err)
 	_, err = repo.AddControl(ctx, creado.ID, models.ControlClinico{Fecha: t2, Peso: 77.0})
 	assert.Error(t, err)
+}
+
+func TestMockUpdateYDeleteControl(t *testing.T) {
+	ctx := context.Background()
+
+	// nil-map safety en struct literal vacío
+	repoVacio := &MockPacienteRepository{}
+	_, err := repoVacio.UpdateControl(ctx, "no-existe", "c1", models.ControlClinico{Peso: 70})
+	assert.Error(t, err)
+	assert.Error(t, repoVacio.DeleteControl(ctx, "no-existe", "c1"))
+
+	repo := NewMockPacienteRepository()
+	p, err := repo.Create(ctx, models.Paciente{Nombre: "Control CRUD", Edad: 30, Peso: 80, Altura: 1.80})
+	require.NoError(t, err)
+
+	t1 := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
+	c1, err := repo.AddControl(ctx, p.ID, models.ControlClinico{Fecha: t1, Peso: 80.0, PorcentajeGrasa: 20.0, IMC: 24.69, Notas: "Inicial"})
+	require.NoError(t, err)
+
+	// Update con fecha cero conserva fecha original
+	act1, err := repo.UpdateControl(ctx, p.ID, c1.ID, models.ControlClinico{Peso: 78.0, PorcentajeGrasa: 19.0, IMC: 24.07, Notas: "Ajustado"})
+	require.NoError(t, err)
+	assert.True(t, act1.Fecha.Equal(t1))
+	assert.Equal(t, 78.0, act1.Peso)
+	assert.Equal(t, "Ajustado", act1.Notas)
+
+	// Update con fecha explícita reemplaza fecha
+	act2, err := repo.UpdateControl(ctx, p.ID, c1.ID, models.ControlClinico{Fecha: t2, Peso: 77.0, PorcentajeGrasa: 18.5, IMC: 23.77, Notas: "Reprogramado"})
+	require.NoError(t, err)
+	assert.True(t, act2.Fecha.Equal(t2))
+	assert.Equal(t, 77.0, act2.Peso)
+
+	// Control inexistente devuelve ErrControlNoEncontrado
+	_, err = repo.UpdateControl(ctx, p.ID, "inexistente", models.ControlClinico{Peso: 70})
+	assert.True(t, errors.Is(err, ErrControlNoEncontrado))
+	err = repo.DeleteControl(ctx, p.ID, "inexistente")
+	assert.True(t, errors.Is(err, ErrControlNoEncontrado))
+
+	// Delete elimina el control del historial
+	require.NoError(t, repo.DeleteControl(ctx, p.ID, c1.ID))
+	lista, err := repo.GetControles(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Empty(t, lista)
+
+	// Segunda eliminación devuelve ErrControlNoEncontrado
+	err = repo.DeleteControl(ctx, p.ID, c1.ID)
+	assert.True(t, errors.Is(err, ErrControlNoEncontrado))
+
+	// Soft delete bloquea update y delete de controles
+	c2, err := repo.AddControl(ctx, p.ID, models.ControlClinico{Fecha: t1, Peso: 76.0})
+	require.NoError(t, err)
+	require.NoError(t, repo.Delete(ctx, p.ID))
+	_, err = repo.UpdateControl(ctx, p.ID, c2.ID, models.ControlClinico{Peso: 75.0})
+	assert.Error(t, err)
+	assert.Error(t, repo.DeleteControl(ctx, p.ID, c2.ID))
 }

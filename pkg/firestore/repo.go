@@ -10,6 +10,8 @@ import (
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"nutricontrol/models"
 )
@@ -259,4 +261,51 @@ func (r *PacienteFirestoreRepo) GetControles(ctx context.Context, pacienteID str
 		return controles[i].Fecha.Before(controles[j].Fecha)
 	})
 	return controles, nil
+}
+
+func (r *PacienteFirestoreRepo) obtenerControlExistente(ctx context.Context, pacienteID, controlID string) (*firestore.DocumentRef, models.ControlClinico, error) {
+	if _, err := r.GetByID(ctx, pacienteID); err != nil {
+		return nil, models.ControlClinico{}, err
+	}
+	docRef := r.col.Doc(pacienteID).Collection("controles").Doc(controlID)
+	doc, err := docRef.Get(ctx)
+	if status.Code(err) == codes.NotFound || (err == nil && !doc.Exists()) {
+		return nil, models.ControlClinico{}, fmt.Errorf("%w con ID %s", ErrControlNoEncontrado, controlID)
+	}
+	if err != nil {
+		return nil, models.ControlClinico{}, err
+	}
+	var existing models.ControlClinico
+	if err := doc.DataTo(&existing); err != nil {
+		return nil, models.ControlClinico{}, err
+	}
+	return docRef, existing, nil
+}
+
+// UpdateControl actualiza un control clínico existente en la subcolección "controles" de un paciente activo.
+// Si control.Fecha es cero, conserva la fecha original del registro.
+func (r *PacienteFirestoreRepo) UpdateControl(ctx context.Context, pacienteID, controlID string, control models.ControlClinico) (*models.ControlClinico, error) {
+	docRef, existing, err := r.obtenerControlExistente(ctx, pacienteID, controlID)
+	if err != nil {
+		return nil, err
+	}
+	if control.Fecha.IsZero() {
+		control.Fecha = existing.Fecha
+	}
+	control.ID = controlID
+	control.PacienteID = pacienteID
+	if _, err := docRef.Set(ctx, control); err != nil {
+		return nil, err
+	}
+	return &control, nil
+}
+
+// DeleteControl elimina un control clínico puntual en la subcolección "controles" de un paciente activo.
+func (r *PacienteFirestoreRepo) DeleteControl(ctx context.Context, pacienteID, controlID string) error {
+	docRef, _, err := r.obtenerControlExistente(ctx, pacienteID, controlID)
+	if err != nil {
+		return err
+	}
+	_, err = docRef.Delete(ctx)
+	return err
 }

@@ -2,6 +2,7 @@ package firestore
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"strings"
@@ -351,4 +352,66 @@ func TestFirestoreRepoControlesClinicos(t *testing.T) {
 	assert.Error(t, err)
 	_, err = repo.AddControl(ctx, p.ID, models.ControlClinico{Fecha: f2, Peso: 76.0})
 	assert.Error(t, err)
+}
+
+func TestFirestoreRepoUpdateYDeleteControl(t *testing.T) {
+	repo := newTestFirestoreRepo(t)
+	ctx := context.Background()
+
+	p, err := repo.Create(ctx, models.Paciente{Nombre: "Firestore Control CRUD", Edad: 31, Peso: 80, Altura: 1.80})
+	require.NoError(t, err)
+
+	f1 := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	f2 := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+	c1, err := repo.AddControl(ctx, p.ID, models.ControlClinico{
+		Fecha: f1, Peso: 80.0, PorcentajeGrasa: 20.0, IMC: 24.69, Notas: "Inicial",
+	})
+	require.NoError(t, err)
+
+	// Update con fecha cero conserva fecha original
+	act1, err := repo.UpdateControl(ctx, p.ID, c1.ID, models.ControlClinico{
+		Peso: 78.5, PorcentajeGrasa: 19.2, IMC: 24.23, Notas: "Editado",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, c1.ID, act1.ID)
+	assert.Equal(t, p.ID, act1.PacienteID)
+	assert.True(t, act1.Fecha.Equal(f1))
+	assert.Equal(t, 78.5, act1.Peso)
+	assert.Equal(t, "Editado", act1.Notas)
+
+	// Update con nueva fecha actualiza fecha y valores
+	act2, err := repo.UpdateControl(ctx, p.ID, c1.ID, models.ControlClinico{
+		Fecha: f2, Peso: 77.0, PorcentajeGrasa: 18.5, IMC: 23.77, Notas: "Nueva fecha",
+	})
+	require.NoError(t, err)
+	assert.True(t, act2.Fecha.Equal(f2))
+
+	controles, err := repo.GetControles(ctx, p.ID)
+	require.NoError(t, err)
+	require.Len(t, controles, 1)
+	assert.Equal(t, 77.0, controles[0].Peso)
+	assert.True(t, controles[0].Fecha.Equal(f2))
+
+	// Control inexistente devuelve ErrControlNoEncontrado
+	_, err = repo.UpdateControl(ctx, p.ID, "inexistente", models.ControlClinico{Peso: 75})
+	assert.True(t, errors.Is(err, ErrControlNoEncontrado))
+	err = repo.DeleteControl(ctx, p.ID, "inexistente")
+	assert.True(t, errors.Is(err, ErrControlNoEncontrado))
+
+	// Delete elimina el documento de subcolección
+	require.NoError(t, repo.DeleteControl(ctx, p.ID, c1.ID))
+	controlesPost, err := repo.GetControles(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Empty(t, controlesPost)
+
+	err = repo.DeleteControl(ctx, p.ID, c1.ID)
+	assert.True(t, errors.Is(err, ErrControlNoEncontrado))
+
+	// Soft delete del paciente bloquea edición y borrado de controles
+	c2, err := repo.AddControl(ctx, p.ID, models.ControlClinico{Fecha: f1, Peso: 76.5})
+	require.NoError(t, err)
+	require.NoError(t, repo.Delete(ctx, p.ID))
+	_, err = repo.UpdateControl(ctx, p.ID, c2.ID, models.ControlClinico{Peso: 75.0})
+	assert.Error(t, err)
+	assert.Error(t, repo.DeleteControl(ctx, p.ID, c2.ID))
 }

@@ -2589,3 +2589,378 @@ func TestExportControlesPacienteCSVNoEncontradoYSoftDeleted(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, rec.Code)
 	}
 }
+
+// TestUpdateControlPacienteOK verifica edición de un control clínico puntual, recálculo automático de IMC
+// y preservación de fecha cuando se omite en el payload.
+func TestUpdateControlPacienteOK(t *testing.T) {
+	t.Run("actualizacion completa con nueva fecha y recalculo de IMC", func(t *testing.T) {
+		e := echo.New()
+		repo := firestore.NewMockPacienteRepository()
+		SetupRoutes(e, repo)
+
+		paciente, err := repo.Create(context.Background(), models.Paciente{
+			Nombre: "Editar Control",
+			Edad:   30,
+			Peso:   80.0,
+			Altura: 1.80,
+		})
+		require.NoError(t, err)
+
+		fOrig := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
+		ctrl, err := repo.AddControl(context.Background(), paciente.ID, models.ControlClinico{
+			Fecha:           fOrig,
+			Peso:            80.0,
+			PorcentajeGrasa: 20.0,
+			IMC:             24.69,
+			Notas:           "Inicial",
+		})
+		require.NoError(t, err)
+
+		payload := `{"fecha":"2026-10-16T11:30:00Z","peso":76.0,"porcentaje_grasa":18.5,"notas":"Corregido"}`
+		req := httptest.NewRequest(http.MethodPut, "/pacientes/"+paciente.ID+"/controles/"+ctrl.ID, strings.NewReader(payload))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var actualizado models.ControlClinico
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &actualizado))
+		assert.Equal(t, ctrl.ID, actualizado.ID)
+		assert.Equal(t, paciente.ID, actualizado.PacienteID)
+		assert.True(t, actualizado.Fecha.Equal(time.Date(2026, 10, 16, 11, 30, 0, 0, time.UTC)))
+		assert.Equal(t, 76.0, actualizado.Peso)
+		assert.Equal(t, 18.5, actualizado.PorcentajeGrasa)
+		assert.Equal(t, 23.46, actualizado.IMC)
+		assert.Equal(t, "Corregido", actualizado.Notas)
+
+		// Verificar persistencia reflejada en GET /controles
+		reqGet := httptest.NewRequest(http.MethodGet, "/pacientes/"+paciente.ID+"/controles", nil)
+		recGet := httptest.NewRecorder()
+		e.ServeHTTP(recGet, reqGet)
+		require.Equal(t, http.StatusOK, recGet.Code)
+
+		var lista []models.ControlClinico
+		require.NoError(t, json.Unmarshal(recGet.Body.Bytes(), &lista))
+		require.Len(t, lista, 1)
+		assert.Equal(t, 76.0, lista[0].Peso)
+		assert.Equal(t, 23.46, lista[0].IMC)
+		assert.Equal(t, "Corregido", lista[0].Notas)
+	})
+
+	t.Run("omite fecha y preserva fecha original", func(t *testing.T) {
+		e := echo.New()
+		repo := firestore.NewMockPacienteRepository()
+		SetupRoutes(e, repo)
+
+		paciente, err := repo.Create(context.Background(), models.Paciente{
+			Nombre: "Sin Altura Control",
+			Edad:   28,
+			Peso:   70.0,
+		})
+		require.NoError(t, err)
+
+		fOrig := time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)
+		ctrl, err := repo.AddControl(context.Background(), paciente.ID, models.ControlClinico{
+			Fecha:           fOrig,
+			Peso:            70.0,
+			PorcentajeGrasa: 21.0,
+			Notas:           "Original",
+		})
+		require.NoError(t, err)
+
+		payload := `{"peso":69.0,"porcentaje_grasa":20.5,"notas":"Ajuste peso"}`
+		req := httptest.NewRequest(http.MethodPut, "/pacientes/"+paciente.ID+"/controles/"+ctrl.ID, strings.NewReader(payload))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var actualizado models.ControlClinico
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &actualizado))
+		assert.True(t, actualizado.Fecha.Equal(fOrig))
+		assert.Equal(t, 69.0, actualizado.Peso)
+		assert.Equal(t, 20.5, actualizado.PorcentajeGrasa)
+		assert.Equal(t, 0.0, actualizado.IMC)
+		assert.Equal(t, "Ajuste peso", actualizado.Notas)
+	})
+}
+
+// TestUpdateControlPacienteErrores verifica table-driven los rechazos 400 (validación/JSON) y 404 (inexistentes, soft delete o aislamiento).
+func TestUpdateControlPacienteErrores(t *testing.T) {
+	casos := []struct {
+		name           string
+		setup          func(t *testing.T, repo *firestore.MockPacienteRepository) (pacienteID, controlID string)
+		payload        string
+		expectedStatus int
+		expectedError  string
+	}{
+		{
+			name: "peso cero",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Val", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				c, err := repo.AddControl(context.Background(), p.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+				require.NoError(t, err)
+				return p.ID, c.ID
+			},
+			payload:        `{"peso":0,"porcentaje_grasa":20}`,
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "peso",
+		},
+		{
+			name: "peso mayor a 500",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Val", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				c, err := repo.AddControl(context.Background(), p.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+				require.NoError(t, err)
+				return p.ID, c.ID
+			},
+			payload:        `{"peso":501,"porcentaje_grasa":20}`,
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "peso",
+		},
+		{
+			name: "porcentaje grasa negativo",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Val", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				c, err := repo.AddControl(context.Background(), p.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+				require.NoError(t, err)
+				return p.ID, c.ID
+			},
+			payload:        `{"peso":70,"porcentaje_grasa":-1}`,
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "porcentaje_grasa",
+		},
+		{
+			name: "porcentaje grasa mayor a 100",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Val", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				c, err := repo.AddControl(context.Background(), p.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+				require.NoError(t, err)
+				return p.ID, c.ID
+			},
+			payload:        `{"peso":70,"porcentaje_grasa":101}`,
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "porcentaje_grasa",
+		},
+		{
+			name: "json malformado",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Val", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				c, err := repo.AddControl(context.Background(), p.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+				require.NoError(t, err)
+				return p.ID, c.ID
+			},
+			payload:        `{"peso":"invalido"}`,
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "Invalid request",
+		},
+		{
+			name: "paciente inexistente",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				return "no-existe", "control-1"
+			},
+			payload:        `{"peso":70,"porcentaje_grasa":20}`,
+			expectedStatus: http.StatusNotFound,
+			expectedError:  "paciente",
+		},
+		{
+			name: "paciente soft deleted",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Soft Del", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				c, err := repo.AddControl(context.Background(), p.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+				require.NoError(t, err)
+				require.NoError(t, repo.Delete(context.Background(), p.ID))
+				return p.ID, c.ID
+			},
+			payload:        `{"peso":71,"porcentaje_grasa":20}`,
+			expectedStatus: http.StatusNotFound,
+			expectedError:  "paciente",
+		},
+		{
+			name: "control inexistente",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Sin Control", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				return p.ID, "control-no-existe"
+			},
+			payload:        `{"peso":71,"porcentaje_grasa":20}`,
+			expectedStatus: http.StatusNotFound,
+			expectedError:  "control",
+		},
+		{
+			name: "control de otro paciente no accesible",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p1, err := repo.Create(context.Background(), models.Paciente{Nombre: "Paciente Uno", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				p2, err := repo.Create(context.Background(), models.Paciente{Nombre: "Paciente Dos", Edad: 31, Peso: 75})
+				require.NoError(t, err)
+				c1, err := repo.AddControl(context.Background(), p1.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+				require.NoError(t, err)
+				return p2.ID, c1.ID
+			},
+			payload:        `{"peso":71,"porcentaje_grasa":20}`,
+			expectedStatus: http.StatusNotFound,
+			expectedError:  "control",
+		},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			repo := firestore.NewMockPacienteRepository()
+			SetupRoutes(e, repo)
+
+			pacienteID, controlID := tc.setup(t, repo)
+			req := httptest.NewRequest(http.MethodPut, "/pacientes/"+pacienteID+"/controles/"+controlID, strings.NewReader(tc.payload))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, tc.expectedStatus, rec.Code)
+			assert.Contains(t, rec.Body.String(), tc.expectedError)
+		})
+	}
+}
+
+// TestDeleteControlPacienteOK verifica eliminación puntual de un control clínico y su efecto en historial y resumen.
+func TestDeleteControlPacienteOK(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	paciente, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Borrar Control",
+		Edad:   33,
+		Peso:   82.0,
+		Altura: 1.80,
+	})
+	require.NoError(t, err)
+
+	f1 := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	f2 := time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC)
+	c1, err := repo.AddControl(context.Background(), paciente.ID, models.ControlClinico{Fecha: f1, Peso: 82.0, PorcentajeGrasa: 22.0, IMC: 25.31})
+	require.NoError(t, err)
+	c2, err := repo.AddControl(context.Background(), paciente.ID, models.ControlClinico{Fecha: f2, Peso: 79.0, PorcentajeGrasa: 20.0, IMC: 24.38})
+	require.NoError(t, err)
+
+	reqDel := httptest.NewRequest(http.MethodDelete, "/pacientes/"+paciente.ID+"/controles/"+c1.ID, nil)
+	recDel := httptest.NewRecorder()
+	e.ServeHTTP(recDel, reqDel)
+	assert.Equal(t, http.StatusNoContent, recDel.Code)
+
+	// Solo queda c2 en el historial
+	reqGet := httptest.NewRequest(http.MethodGet, "/pacientes/"+paciente.ID+"/controles", nil)
+	recGet := httptest.NewRecorder()
+	e.ServeHTTP(recGet, reqGet)
+	require.Equal(t, http.StatusOK, recGet.Code)
+	var lista []models.ControlClinico
+	require.NoError(t, json.Unmarshal(recGet.Body.Bytes(), &lista))
+	require.Len(t, lista, 1)
+	assert.Equal(t, c2.ID, lista[0].ID)
+
+	// El resumen refleja total_controles == 1
+	reqRes := httptest.NewRequest(http.MethodGet, "/pacientes/"+paciente.ID+"/controles/resumen", nil)
+	recRes := httptest.NewRecorder()
+	e.ServeHTTP(recRes, reqRes)
+	require.Equal(t, http.StatusOK, recRes.Code)
+	var resumen ResumenControles
+	require.NoError(t, json.Unmarshal(recRes.Body.Bytes(), &resumen))
+	assert.Equal(t, 1, resumen.TotalControles)
+	assert.Equal(t, 79.0, resumen.PesoInicial)
+	assert.Equal(t, 79.0, resumen.PesoActual)
+}
+
+// TestDeleteControlPacienteErrores verifica 404 ante paciente inexistente/eliminado, control inexistente, doble borrado o control ajeno.
+func TestDeleteControlPacienteErrores(t *testing.T) {
+	casos := []struct {
+		name          string
+		setup         func(t *testing.T, repo *firestore.MockPacienteRepository) (pacienteID, controlID string)
+		expectedError string
+	}{
+		{
+			name: "paciente inexistente",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				return "no-existe", "control-1"
+			},
+			expectedError: "paciente",
+		},
+		{
+			name: "paciente soft deleted",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Soft Del", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				c, err := repo.AddControl(context.Background(), p.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+				require.NoError(t, err)
+				require.NoError(t, repo.Delete(context.Background(), p.ID))
+				return p.ID, c.ID
+			},
+			expectedError: "paciente",
+		},
+		{
+			name: "control inexistente",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Activo", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				return p.ID, "control-no-existe"
+			},
+			expectedError: "control",
+		},
+		{
+			name: "control de otro paciente",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) (string, string) {
+				p1, err := repo.Create(context.Background(), models.Paciente{Nombre: "Uno", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				p2, err := repo.Create(context.Background(), models.Paciente{Nombre: "Dos", Edad: 31, Peso: 75})
+				require.NoError(t, err)
+				c1, err := repo.AddControl(context.Background(), p1.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+				require.NoError(t, err)
+				return p2.ID, c1.ID
+			},
+			expectedError: "control",
+		},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			repo := firestore.NewMockPacienteRepository()
+			SetupRoutes(e, repo)
+
+			pacienteID, controlID := tc.setup(t, repo)
+			req := httptest.NewRequest(http.MethodDelete, "/pacientes/"+pacienteID+"/controles/"+controlID, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusNotFound, rec.Code)
+			assert.Contains(t, rec.Body.String(), tc.expectedError)
+		})
+	}
+
+	t.Run("doble eliminacion devuelve 404 en la segunda", func(t *testing.T) {
+		e := echo.New()
+		repo := firestore.NewMockPacienteRepository()
+		SetupRoutes(e, repo)
+
+		p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Doble Del", Edad: 30, Peso: 70})
+		require.NoError(t, err)
+		c, err := repo.AddControl(context.Background(), p.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+		require.NoError(t, err)
+
+		req1 := httptest.NewRequest(http.MethodDelete, "/pacientes/"+p.ID+"/controles/"+c.ID, nil)
+		rec1 := httptest.NewRecorder()
+		e.ServeHTTP(rec1, req1)
+		require.Equal(t, http.StatusNoContent, rec1.Code)
+
+		req2 := httptest.NewRequest(http.MethodDelete, "/pacientes/"+p.ID+"/controles/"+c.ID, nil)
+		rec2 := httptest.NewRecorder()
+		e.ServeHTTP(rec2, req2)
+		assert.Equal(t, http.StatusNotFound, rec2.Code)
+	})
+}
