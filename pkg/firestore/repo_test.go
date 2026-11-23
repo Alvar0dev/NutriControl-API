@@ -415,3 +415,38 @@ func TestFirestoreRepoUpdateYDeleteControl(t *testing.T) {
 	assert.Error(t, err)
 	assert.Error(t, repo.DeleteControl(ctx, p.ID, c2.ID))
 }
+
+func TestFirestoreRepoGetControlByID(t *testing.T) {
+	repo := newTestFirestoreRepo(t)
+	ctx := context.Background()
+
+	p1, err := repo.Create(ctx, models.Paciente{Nombre: "Firestore Uno", Edad: 30, Peso: 80, Altura: 1.80})
+	require.NoError(t, err)
+	p2, err := repo.Create(ctx, models.Paciente{Nombre: "Firestore Dos", Edad: 34, Peso: 72})
+	require.NoError(t, err)
+
+	f1 := time.Date(2026, 10, 15, 10, 0, 0, 0, time.UTC)
+	c1, err := repo.AddControl(ctx, p1.ID, models.ControlClinico{
+		Fecha: f1, Peso: 79.0, PorcentajeGrasa: 19.5, IMC: 24.38, Notas: "Detalle",
+	})
+	require.NoError(t, err)
+
+	obtenido, err := repo.GetControlByID(ctx, p1.ID, c1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, c1.ID, obtenido.ID)
+	assert.Equal(t, p1.ID, obtenido.PacienteID)
+	assert.True(t, obtenido.Fecha.Equal(f1))
+	assert.Equal(t, 79.0, obtenido.Peso)
+	assert.Equal(t, "Detalle", obtenido.Notas)
+
+	// Inexistente y aislamiento por subcolección de paciente
+	_, err = repo.GetControlByID(ctx, p1.ID, "inexistente")
+	assert.True(t, errors.Is(err, ErrControlNoEncontrado))
+	_, err = repo.GetControlByID(ctx, p2.ID, c1.ID)
+	assert.True(t, errors.Is(err, ErrControlNoEncontrado))
+
+	// Paciente eliminado lógicamente bloquea lectura
+	require.NoError(t, repo.Delete(ctx, p1.ID))
+	_, err = repo.GetControlByID(ctx, p1.ID, c1.ID)
+	assert.Error(t, err)
+}

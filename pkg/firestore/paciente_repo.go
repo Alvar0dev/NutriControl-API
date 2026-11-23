@@ -23,6 +23,7 @@ type PacienteRepository interface {
 	GetInactivos(ctx context.Context) ([]models.Paciente, error)
 	AddControl(ctx context.Context, pacienteID string, control models.ControlClinico) (*models.ControlClinico, error)
 	GetControles(ctx context.Context, pacienteID string) ([]models.ControlClinico, error)
+	GetControlByID(ctx context.Context, pacienteID, controlID string) (*models.ControlClinico, error)
 	UpdateControl(ctx context.Context, pacienteID, controlID string, control models.ControlClinico) (*models.ControlClinico, error)
 	DeleteControl(ctx context.Context, pacienteID, controlID string) error
 }

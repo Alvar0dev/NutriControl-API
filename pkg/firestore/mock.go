@@ -157,6 +157,22 @@ func (m *MockPacienteRepository) GetControles(ctx context.Context, pacienteID st
 	return res, nil
 }
 
+// GetControlByID recupera un control clínico puntual de un paciente activo en el mock.
+func (m *MockPacienteRepository) GetControlByID(ctx context.Context, pacienteID, controlID string) (*models.ControlClinico, error) {
+	if _, err := m.GetByID(ctx, pacienteID); err != nil {
+		return nil, err
+	}
+	if m.controles != nil {
+		for _, existing := range m.controles[pacienteID] {
+			if existing.ID == controlID {
+				copia := existing
+				return &copia, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("%w con ID %s", ErrControlNoEncontrado, controlID)
+}
+
 // UpdateControl actualiza un control clínico existente de un paciente activo en el mock.
 // Si control.Fecha es cero, conserva la fecha original del control.
 func (m *MockPacienteRepository) UpdateControl(ctx context.Context, pacienteID, controlID string, control models.ControlClinico) (*models.ControlClinico, error) {

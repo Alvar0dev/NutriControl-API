@@ -698,6 +698,118 @@ func DeleteControlPaciente(c echo.Context, repo firestore.PacienteRepository) er
 	return c.NoContent(http.StatusNoContent)
 }
 
+// GetControlPacienteByID obtiene un control clínico puntual perteneciente a un paciente activo.
+func GetControlPacienteByID(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	controlID := c.Param("controlId")
+	if id == "" || controlID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Los campos 'id' y 'controlId' son requeridos"})
+	}
+
+	ctx := c.Request().Context()
+	if _, err := repo.GetByID(ctx, id); err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+
+	control, err := repo.GetControlByID(ctx, id, controlID)
+	if err != nil {
+		if errors.Is(err, firestore.ErrControlNoEncontrado) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró control clínico con ID " + controlID})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener control clínico"})
+	}
+	return c.JSON(http.StatusOK, control)
+}
+
+// PatchControlPaciente aplica una actualización parcial sobre un control clínico puntual de un paciente activo.
+// Solo modifica los campos enviados en el body (fecha, peso, porcentaje_grasa, notas) y recalcula el IMC.
+func PatchControlPaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	controlID := c.Param("controlId")
+	if id == "" || controlID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Los campos 'id' y 'controlId' son requeridos"})
+	}
+
+	ctx := c.Request().Context()
+	paciente, err := repo.GetByID(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+
+	existente, err := repo.GetControlByID(ctx, id, controlID)
+	if err != nil {
+		if errors.Is(err, firestore.ErrControlNoEncontrado) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró control clínico con ID " + controlID})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener control clínico"})
+	}
+
+	body, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+	var cambios map[string]any
+	if err := json.Unmarshal(body, &cambios); err != nil || cambios == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+
+	if rawFecha, ok := cambios["fecha"]; ok {
+		fechaStr, okStr := rawFecha.(string)
+		if !okStr || strings.TrimSpace(fechaStr) == "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'fecha' debe tener formato YYYY-MM-DD o RFC3339"})
+		}
+		parsedFecha, parseErr := parseFechaQuery(fechaStr, false)
+		if parseErr != nil || parsedFecha == nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'fecha' debe tener formato YYYY-MM-DD o RFC3339"})
+		}
+		existente.Fecha = *parsedFecha
+	}
+	if rawPeso, ok := cambios["peso"]; ok {
+		peso, okNum := rawPeso.(float64)
+		if !okNum {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'peso' debe ser un número"})
+		}
+		if peso <= 0 || peso > pesoMaximo {
+			return c.JSON(http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("El campo 'peso' debe ser mayor que 0 y menor o igual a %d", pesoMaximo),
+			})
+		}
+		existente.Peso = peso
+	}
+	if rawGrasa, ok := cambios["porcentaje_grasa"]; ok {
+		grasa, okNum := rawGrasa.(float64)
+		if !okNum {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'porcentaje_grasa' debe ser un número"})
+		}
+		if grasa < 0 || grasa > porcentajeGrasaMaximo {
+			return c.JSON(http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("El campo 'porcentaje_grasa' debe estar entre 0 y %d", porcentajeGrasaMaximo),
+			})
+		}
+		existente.PorcentajeGrasa = grasa
+	}
+	if rawNotas, ok := cambios["notas"]; ok {
+		notas, okStr := rawNotas.(string)
+		if !okStr {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'notas' debe ser una cadena de texto"})
+		}
+		existente.Notas = notas
+	}
+
+	existente.ID = controlID
+	existente.PacienteID = id
+	existente.IMC = calcularIMCControl(existente.Peso, paciente.Altura)
+
+	actualizado, err := repo.UpdateControl(ctx, id, controlID, *existente)
+	if err != nil {
+		if errors.Is(err, firestore.ErrControlNoEncontrado) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró control clínico con ID " + controlID})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al actualizar control clínico"})
+	}
+	return c.JSON(http.StatusOK, actualizado)
+}
+
 // parseFechaQuery parsea una fecha de query param en formato RFC3339 o YYYY-MM-DD.
 // Si finDeDia es true y el formato es YYYY-MM-DD, ajusta el límite al final del día UTC (23:59:59.999999999).
 func parseFechaQuery(valor string, finDeDia bool) (*time.Time, error) {
@@ -1120,6 +1232,12 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	e.GET("/pacientes/{id}/controles/export", func(c echo.Context) error {
 		return ExportControlesPacienteCSV(c, repo)
 	})
+	e.GET("/pacientes/:id/controles/:controlId", func(c echo.Context) error {
+		return GetControlPacienteByID(c, repo)
+	})
+	e.GET("/pacientes/{id}/controles/{controlId}", func(c echo.Context) error {
+		return GetControlPacienteByID(c, repo)
+	})
 	e.GET("/pacientes/:id/controles", func(c echo.Context) error {
 		return GetControlesPaciente(c, repo)
 	})
@@ -1137,6 +1255,12 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.PUT("/pacientes/{id}/controles/{controlId}", func(c echo.Context) error {
 		return UpdateControlPaciente(c, repo)
+	})
+	e.PATCH("/pacientes/:id/controles/:controlId", func(c echo.Context) error {
+		return PatchControlPaciente(c, repo)
+	})
+	e.PATCH("/pacientes/{id}/controles/{controlId}", func(c echo.Context) error {
+		return PatchControlPaciente(c, repo)
 	})
 	e.DELETE("/pacientes/:id/controles/:controlId", func(c echo.Context) error {
 		return DeleteControlPaciente(c, repo)

@@ -282,6 +282,17 @@ func (r *PacienteFirestoreRepo) obtenerControlExistente(ctx context.Context, pac
 	return docRef, existing, nil
 }
 
+// GetControlByID recupera un control clínico puntual de un paciente activo en Firestore.
+func (r *PacienteFirestoreRepo) GetControlByID(ctx context.Context, pacienteID, controlID string) (*models.ControlClinico, error) {
+	_, existing, err := r.obtenerControlExistente(ctx, pacienteID, controlID)
+	if err != nil {
+		return nil, err
+	}
+	existing.ID = controlID
+	existing.PacienteID = pacienteID
+	return &existing, nil
+}
+
 // UpdateControl actualiza un control clínico existente en la subcolección "controles" de un paciente activo.
 // Si control.Fecha es cero, conserva la fecha original del registro.
 func (r *PacienteFirestoreRepo) UpdateControl(ctx context.Context, pacienteID, controlID string, control models.ControlClinico) (*models.ControlClinico, error) {
