@@ -50,6 +50,8 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T29 | S1 | inline | done | `986116a` feat: exportación CSV de controles clínicos y altura en ExportPacientesCSV |
 | T30 | S1 | inline | done | `027f1af` feat: edición y eliminación de controles clínicos puntuales |
 | T31 | S1 | inline | done | `b3df81f` ci: agregar workflow de GitHub Actions con vet, test -race y build |
+| T32 | S1 | inline | done | `161afbf` feat: hardening HTTP, PORT por env var, middlewares y graceful shutdown en main.go |
+| T33 | S1 | inline | done | `db52369` feat: consulta puntual y actualización parcial de controles clínicos (GET/PATCH) |
 
 ## Log
 
@@ -200,6 +202,16 @@ L31: [asistente] Implementadas test-first la Opción 1 (`027f1af`) y la Opción 
 L32: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
 L32: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.17 (`ErrControlNoEncontrado` vs errores internos `500`, preservación de `Fecha` histórica en `PUT` cuando se omite, eliminación de duplicación en helpers compartidos, limitación local de `go test -race` en Windows sin CGO/`gcc` vs runner Linux de CI, y bloqueo externo de `review-readability` en host) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (2, 3.2, 4.1, 6, 6.19 y dificultades 23-26 en 6.20), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: Hardening HTTP y ciclo de vida en `main.go` — `PORT` env var, middlewares `Logger`/`Recover`, timeouts y `graceful shutdown`; Opción 2: Consulta puntual `GET /pacientes/:id/controles/:controlId` o actualización parcial `PATCH /pacientes/:id/controles/:controlId`; Opción 3: Verificación del workflow CI `-race` en GitHub Actions y configuración manual de RDD en el host si se desea reactivar).
+
+L33: [usuario] "haz los todo de hoy"
+L33: [asistente] Implementadas test-first la Opción 1 (`161afbf`) y la Opción 2 (`db52369`), y verificada la corrida de CI en GitHub Actions (Opción 3, v1.0.18):
+- Opción 1 (`161afbf`): refactorizado `main.go` en `resolveAddr`, `newEcho` (`RequestID` → `Logger` → `Recover`, `HideBanner = true`), `newServer` (timeouts `5s`/`15s`/`15s`/`60s`), `serve` y `runServer` con `signal.NotifyContext` y apagado ordenado de `10s`; agregados 4 tests en `main_test.go` (`50/50` iteraciones sin flakiness y verificación independiente read-only `PASS` por concurrencia / ítem 4).
+- Opción 2 (`db52369`): agregado `GetControlByID` en `PacienteRepository`, `MockPacienteRepository` y `PacienteFirestoreRepo` (reutilizando `obtenerControlExistente`), handlers `GetControlPacienteByID` y `PatchControlPaciente` (validación estricta de tipos JSON y recálculo de `IMC`), registro en `SetupRoutes` respetando precedencia estática de `/resumen` y `/export`, y 6 tests nuevos (`113` tests top-level en verde).
+- Opción 3: confirmada vía `gh run view 44898033376` la corrida exitosa de `.github/workflows/ci.yml` en `ubuntu-latest` (`1m26s`, incluyendo `go test -race`), detectando aviso de deprecación de Node.js 20 en `actions/checkout@v4` y `actions/setup-go@v5`.
+
+L34: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L34: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.18 (testabilidad determinista de `graceful shutdown` con `net.Listener` efímero y `errCh` bufferizado, orden de middlewares `RequestID`→`Logger`→`Recover`, precedencia estática de `/resumen` y `/export` frente a `GET .../controles/:controlId`, validación estricta de tipos JSON en `PatchControlPaciente` y hallazgo de `notas.(string)` en `PatchPaciente`, más verificación de CI `44898033376` con aviso Node.js 20) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md`, `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: `BodyLimit`, `CORS` configurable y endurecer `PatchPaciente` contra tipos JSON inválidos; Opción 2: actualizar acciones CI a Node.js 24 y sumar `-cover` en `.github/workflows/ci.yml`; Opción 3: endpoint `GET /pacientes/:id/controles/ultimo` para consulta rápida del último control clínico).
 
 
 

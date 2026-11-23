@@ -1,5 +1,37 @@
 # CHANGELOG.md
 
+## Versión 1.0.18 - 2026-11-23
+
+### Hardening HTTP y ciclo de vida en `main.go`, consulta/edición parcial de controles (`GET/PATCH /pacientes/:id/controles/:controlId`) y verificación de CI
+
+- **Hardening HTTP y graceful shutdown (`main.go`, `main_test.go`)**:
+  - `resolveAddr(portEnv)`: soporte de variable de entorno `PORT` con normalización (`"9090"` → `":9090"`, `":3000"` preservado, default `":8080"`).
+  - `newEcho(repo)`: registra middlewares operativos de Echo v4 en orden `RequestID` → `Logger` → `Recover` (`HideBanner = true`), rutas de dominio vía `handlers.SetupRoutes` y ruta raíz `GET /`.
+  - `newServer(addr, repo)`: configura `*http.Server` con timeouts explícitos (`ReadHeaderTimeout: 5s`, `ReadTimeout: 15s`, `WriteTimeout: 15s`, `IdleTimeout: 60s`).
+  - `serve` y `runServer`: ciclo de vida con `signal.NotifyContext` (`os.Interrupt`, `syscall.SIGTERM`), apagado ordenado `srv.Shutdown` con timeout de `10s` y drenado garantizado de `errCh` (buffer `1`) para evitar fugas de goroutines.
+  - Tests nuevos en `main_test.go`: `TestResolveAddr`, `TestNewEchoMiddlewaresYRoutes` (verificando `X-Request-ID` y captura de `panic` → `500`), `TestNewServerTimeouts` y `TestServeGracefulShutdown` (petición HTTP real sobre `127.0.0.1:0` y apagado ordenado).
+  - Commit: `161afbf feat: hardening HTTP, PORT por env var, middlewares y graceful shutdown en main.go`.
+- **Consulta puntual y actualización parcial de control clínico (`GET/PATCH /pacientes/:id/controles/:controlId`)**:
+  - Puerto y adaptadores (`pkg/firestore/paciente_repo.go`, `mock.go`, `repo.go`): agregado `GetControlByID(ctx, pacienteID, controlID)` con paridad entre `MockPacienteRepository` (`nil`-safe, copia defensiva, exclusión de soft-deleted, `ErrControlNoEncontrado`) y `PacienteFirestoreRepo` (reutilizando `obtenerControlExistente` y normalizando `ID`/`PacienteID`).
+  - Handlers (`handlers/paciente.go`):
+    - `GetControlPacienteByID` (`GET /pacientes/:id/controles/:controlId`): devuelve `200 OK` con el control, `404` si paciente o control no existen (o pertenecen a otro paciente) y `500` ante fallos internos.
+    - `PatchControlPaciente` (`PATCH /pacientes/:id/controles/:controlId`): actualiza únicamente los campos enviados (`fecha` en `YYYY-MM-DD`/`RFC3339`, `peso`, `porcentaje_grasa`, `notas`) con validación estricta de tipos JSON y rangos clínicos (`400`), recalcula `IMC` según `paciente.Altura` vigente y persiste mediante `UpdateControl`.
+  - Rutas registradas en `SetupRoutes` ubicando `GET /pacientes/:id/controles/:controlId` explícitamente después de `/resumen` y `/export` para preservar la precedencia estática en Echo v4.
+  - Tests nuevos (`handlers/paciente_test.go`, `pkg/firestore/mock_test.go`, `pkg/firestore/repo_test.go`): `TestGetControlPacienteByIDOK`, `TestGetControlPacienteByIDErrores`, `TestPatchControlPacienteOK`, `TestPatchControlPacienteErrores`, `TestMockGetControlByID` y `TestFirestoreRepoGetControlByID` (113 tests top-level en verde).
+  - Commit: `db52369 feat: consulta puntual y actualización parcial de controles clínicos (GET/PATCH)`.
+- **Verificación de CI en GitHub Actions**:
+  - Comprobada vía `gh run view 44898033376` la primera ejecución exitosa de `.github/workflows/ci.yml` sobre `main` (`46e9d59`, `Go Vet, Test (race) & Build` en `1m26s`).
+  - Detectada anotación informativa de deprecación de Node.js 20 en `actions/checkout@v4` y `actions/setup-go@v5` (ejecutados en Node.js 24 por el runner).
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Testabilidad determinista del `graceful shutdown` sin puertos fijos ni fugas de goroutines.** `e.Start(":8080")` acopla el enlace TCP y el bucle de servicio dentro de `main()`, impidiendo probar el apagado ordenado en paralelo o sin colisiones de puerto. Separar `newEcho`, `newServer`, `serve(ctx, srv, ln, timeout)` y `runServer` permitió inyectar un `net.Listener` efímero (`127.0.0.1:0`), enviar una petición real a `/health`, cancelar el contexto y drenar `errCh` (buffer `1`) tras `srv.Shutdown`, verificado en `50/50` ejecuciones consecutivas sin flakiness.
+2. **Orden de middlewares en `newEcho`.** Registrar `RequestID` → `Logger` → `Recover` asegura que el `X-Request-ID` exista antes de loguear cada petición y que `Recover` capture panics dentro de los handlers devolviendo `500` en lugar de derribar el proceso.
+3. **Precedencia de rutas en Echo v4 al introducir `GET /pacientes/:id/controles/:controlId`.** Esta ruta comparte profundidad y método `GET` con `/pacientes/:id/controles/resumen` y `/pacientes/:id/controles/export`. Registrándola después de ambas rutas estáticas en `SetupRoutes` y validando explícitamente las tres rutas dentro de `TestGetControlPacienteByIDOK` se garantiza contractualmente ausencia de colisiones.
+4. **Validación estricta de tipos JSON en `PatchControlPaciente`.** Al deserializar en `map[string]any` para distinguir campos omitidos de valores cero, un valor con tipo incorrecto (p. ej. `"notas": 123` o `"peso": "alto"`) causaría panic con un type assertion directo sin coma-ok (como ocurre aún en `PatchPaciente` para `notas`, identificado como mejora pendiente). En `PatchControlPaciente` todos los campos se validan con `ok` devolviendo `400 Bad Request` descriptivo, y `fecha` reutiliza `parseFechaQuery` para aceptar tanto `YYYY-MM-DD` como `RFC3339`.
+5. **Validación real de `-race` en GitHub Actions y detección de aviso Node.js 20.** Aunque el host Windows carece de `gcc`/CGO para correr `-race` en local, la corrida `44898033376` confirmó en `ubuntu-latest` que `go test -race -count=1 ./...` pasa sin carreras y sacó a la luz el aviso de deprecación de Node.js 20 en `actions/checkout@v4` y `actions/setup-go@v5`.
+
+---
 ## Versión 1.0.17 - 2026-11-21
 
 ### Edición y eliminación de controles clínicos puntuales (`PUT/DELETE /pacientes/:id/controles/:controlId`) y pipeline CI en GitHub Actions

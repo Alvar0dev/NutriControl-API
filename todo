@@ -43,11 +43,15 @@
 - [done] Opción 2: Pipeline CI en GitHub Actions (.github/workflows/ci.yml con go test -race, go vet y go build) (commit b3df81f)
 - [blocked/host] Opción 3: Asignar modelo a lente review-readability en models.json (configuración externa al repo; models.json solo define providers strata/ollama)
 - [done] Documentar dificultades y decisiones de diseño v1.0.17 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
-- [pending] Opción 1: Hardening HTTP y ciclo de vida en main.go (PORT por env var, middlewares Logger/Recover, timeouts y graceful shutdown)
-- [pending] Opción 2: Consulta puntual y actualización parcial de control clínico (GET/PATCH /pacientes/:id/controles/:controlId)
-- [pending] Opción 3: Verificar primera ejecución de CI (.github/workflows/ci.yml con -race) en GitHub y, si se desea reactivar RDD, configurar review-readability manualmente en el host
+- [done] Opción 1: Hardening HTTP y ciclo de vida en main.go (PORT por env var, middlewares RequestID/Logger/Recover, timeouts y graceful shutdown + main_test.go) (v1.0.18) (commit 161afbf)
+- [done] Opción 2: Consulta puntual y actualización parcial de control clínico (GET/PATCH /pacientes/:id/controles/:controlId) (v1.0.18) (commit db52369)
+- [done] Opción 3 (CI): Verificada primera ejecución de .github/workflows/ci.yml en GitHub Actions (run 44898033376 PASS en 1m26s con go test -race; ajuste manual RDD sigue fuera del repo)
+- [done] Documentar dificultades y decisiones de diseño v1.0.18 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
+- [pending] Opción 1: Hardening de entrada HTTP (middleware BodyLimit y CORS configurable en main.go) y endurecimiento de tipos JSON en PatchPaciente (corregir type assertion notas.(string) sin ok)
+- [pending] Opción 2: Actualizar acciones en .github/workflows/ci.yml a versiones compatibles con Node.js 24 (eliminar aviso de deprecación de Node.js 20) y añadir go test -race -cover ./...
+- [pending] Opción 3: Endpoint GET /pacientes/:id/controles/ultimo para consulta rápida del control clínico más reciente
 
-=== Estado actual (2026-11-21) ===
+=== Estado actual (2026-11-23) ===
 
-Estado git: rama main sincronizada con origin/main (103 tests top-level en verde, go vet y go build OK; go test -race delegado al runner ubuntu-latest de CI por ausencia de gcc/CGO local en Windows).
-Pendientes: Opción 1 (hardening HTTP y graceful shutdown en main.go), Opción 2 (GET/PATCH /pacientes/:id/controles/:controlId) y Opción 3 (verificar corrida CI en GitHub / ajuste manual externo RDD).
+Estado git: rama main sincronizada con origin/main (113 tests top-level en verde en nutricontrol, handlers, models y pkg/firestore; go vet y go build OK; CI verificado en verde en GitHub Actions run 44898033376).
+Pendientes: Opción 1 (BodyLimit/CORS y hardening de tipos en PatchPaciente), Opción 2 (CI Node.js 24 + cobertura) y Opción 3 (GET /pacientes/:id/controles/ultimo).

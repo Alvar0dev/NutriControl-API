@@ -19,7 +19,8 @@ nutricontrol/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                 # CI en GitHub Actions (vet, test -race, build).
-├── main.go                        # Entry point. Setup de Echo + inyección repo.
+├── main.go                        # Entry point. Echo + middlewares + timeouts + graceful shutdown.
+├── main_test.go                   # Tests de arranque, middlewares, timeouts y graceful shutdown.
 ├── go.mod / go.sum                # Módulo `nutricontrol`.
 ├── PROJECT_INDEX.md               # ESTE archivo: navegación, comandos, estado.
 ├── AGENTS.md                      # Contexto operativo breve (arranque rápido).
@@ -57,11 +58,12 @@ nutricontrol/
 
 ### 3.1 Arranque — `main.go`
 
-Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
+Lee env vars: `PORT` (default `:8080`), `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 
 - Si mock → `firestore.NewMockPacienteRepository()`.
 - Si real → `firestore.NewPacienteFirestoreRepo(ctx, projectID)` (falla abiertamente si no hay credenciales GCP).
-- Registra rutas vía `handlers.SetupRoutes(e, repo)`.
+- Construye Echo vía `newEcho(repo)` (middlewares `RequestID`, `Logger`, `Recover`, `handlers.SetupRoutes(e, repo)` y `GET /`).
+- Arranca `*http.Server` (`newServer`) con timeouts explícitos (`ReadHeaderTimeout: 5s`, `ReadTimeout: 15s`, `WriteTimeout: 15s`, `IdleTimeout: 60s`) y apagado ordenado (`runServer` / `serve`) ante `SIGINT`/`SIGTERM` con timeout de `10s`.
 
 ### 3.2 Rutas (contrato API)
 
@@ -80,8 +82,10 @@ Lee env vars: `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 | GET | `/pacientes/{id}/controles` | GetControlesPaciente | GetByID + GetControles + filtro `?desde=&hasta=` y paginación `?limit=&offset=` | 200 OK `[ControlClinico]` / 400 / 404 |
 | GET | `/pacientes/{id}/controles/resumen` | GetResumenControlesPaciente | GetByID + GetControles | 200 OK `ResumenControles` / 404 |
 | GET | `/pacientes/{id}/controles/export` | ExportControlesPacienteCSV | GetByID + GetControles + filtro `?desde=&hasta=` | 200 OK `text/csv` (`attachment; filename="controles.csv"`) / 400 / 404 |
+| GET | `/pacientes/{id}/controles/{controlId}` | GetControlPacienteByID | GetByID + GetControlByID | 200 OK `ControlClinico` / 404 |
 | POST | `/pacientes/{id}/controles` | CreateControlPaciente | AddControl | 201 Created `ControlClinico` / 400 / 404 |
 | PUT | `/pacientes/{id}/controles/{controlId}` | UpdateControlPaciente | UpdateControl | 200 OK `ControlClinico` / 400 / 404 |
+| PATCH | `/pacientes/{id}/controles/{controlId}` | PatchControlPaciente | GetByID + GetControlByID + UpdateControl | 200 OK `ControlClinico` / 400 / 404 |
 | DELETE | `/pacientes/{id}/controles/{controlId}` | DeleteControlPaciente | DeleteControl | 204 No Content / 404 |
 | GET | `/pacientes/search` | SearchPacientes | GetAll(ctx, limit, offset) + filtro en memoria | 200 OK `[Paciente]` paginado |
 | GET | `/pacientes/stats` | StatsPacientes | GetAll(ctx, limit, offset) + agregación en memoria | 200 OK `{total, edad_promedio, peso_promedio, porcentaje_grasa_promedio, edades[], pesos[]}` |
@@ -114,6 +118,7 @@ type PacienteRepository interface {
     GetInactivos(ctx context.Context) ([]models.Paciente, error)
     AddControl(ctx context.Context, pacienteID string, control models.ControlClinico) (*models.ControlClinico, error)
     GetControles(ctx context.Context, pacienteID string) ([]models.ControlClinico, error)
+    GetControlByID(ctx context.Context, pacienteID, controlID string) (*models.ControlClinico, error)
     UpdateControl(ctx context.Context, pacienteID, controlID string, control models.ControlClinico) (*models.ControlClinico, error)
     DeleteControl(ctx context.Context, pacienteID, controlID string) error
 }
@@ -178,6 +183,7 @@ go vet ./...                     # Verificación estándar
 
 | Variable | Obligatorio | Valor | Propósito |
 |----------|-------------|-------|-----------|
+| `PORT` | No | `8080` o `:8080` | Puerto de escucha HTTP (default `:8080`). |
 | `NUTRICONTROL_USE_MOCK` | No | `true` | Forzar mock en memoria. |
 | `GCP_PROJECT_ID` | No | `<id>` | ID proyecto GCP para Firestore real. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | `/path/cred.json` | Credenciales de servicio GCP. |
@@ -186,9 +192,9 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | CRUD completo (`GET/POST/PUT/PATCH/DELETE` soft delete por ID), restauración y listado de inactivos (`POST /pacientes/:id/restore`, `GET /pacientes/inactivos`), historial completo de controles clínicos (`GET/POST /pacientes/:id/controles`, `PUT/DELETE /pacientes/:id/controles/:controlId`, `GET /pacientes/:id/controles/resumen`, `GET /pacientes/:id/controles/export`), `GET /health`, cálculo de IMC (`GET /pacientes/imc/{id}` y `/pacientes/{id}/imc`), reporte analítico (`GET /pacientes/reporte`), alta masiva (`POST /pacientes/batch`), filtro por nombre, ordenamiento dinámico (`sort`/`order`), `search` con filtros (`nombre`, `edad`, `peso`, `porcentaje_grasa`) y paginación nativa `limit`/`offset`, `stats`, `count`, exportación CSV con `altura` (`GET /pacientes/export`), `GET /pacientes/edad/{edad}`, validaciones de negocio (`edad` 1-120, `peso` 0-500, `porcentaje_grasa` 0-100, `altura` 0.30-2.50m) y normalización de nombres. |
-| Tests | `go test -count=1 ./...` verde (103 tests top-level en `handlers`, `models`, `pkg/firestore`). |
-| Build / CI | `go build ./...` y `go vet ./...` OK. Workflow CI `.github/workflows/ci.yml` (`go vet`, `go test -race`, `go build`). |
+| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `RequestID`/`Logger`/`Recover`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`), CRUD completo de controles clínicos (`GET/POST /pacientes/:id/controles`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
+| Tests | `go test -count=1 ./...` verde (113 tests top-level en `nutricontrol`, `handlers`, `models`, `pkg/firestore`). |
+| Build / CI | `go build ./...` y `go vet ./...` OK. Workflow CI `.github/workflows/ci.yml` validado en GitHub Actions (run `44898033376` en verde con `-race`). |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente. `feature-c4-search.md` y `feature-b-paginacion-firestore.md` archivados en `odd/tasks/archive/`. |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
@@ -355,7 +361,20 @@ go vet ./...                     # Verificación estándar
   - Ejecuta `go vet ./...`, `go test -race -count=1 ./...` y `go build ./...` en `ubuntu-latest` ante `push`/`pull_request` sobre `main` con permisos `contents: read`.
   - Commit: `b3df81f ci: agregar workflow de GitHub Actions con vet, test -race y build`.
 
-### 6.20 Dificultades acumuladas y decisiones de diseño
+### 6.20 Feature: Hardening HTTP en `main.go` y consulta/edición parcial de controles `GET/PATCH` (v1.0.18)
+
+- **Hardening HTTP y ciclo de vida (`main.go`, `main_test.go`)**:
+  - `resolveAddr` lee `PORT` (default `:8080`), `newEcho` registra `RequestID` → `Logger` → `Recover` (`HideBanner = true`), `newServer` configura timeouts explícitos (`5s`/`15s`/`15s`/`60s`) y `serve`/`runServer` gestionan apagado ordenado ante `SIGINT`/`SIGTERM` con timeout de `10s`.
+  - Tests: `TestResolveAddr`, `TestNewEchoMiddlewaresYRoutes`, `TestNewServerTimeouts` y `TestServeGracefulShutdown`.
+  - Commit: `161afbf feat: hardening HTTP, PORT por env var, middlewares y graceful shutdown en main.go`.
+- **Consulta puntual y actualización parcial de controles (`GET/PATCH /pacientes/:id/controles/:controlId`)**:
+  - `GetControlByID` en `PacienteRepository`, `MockPacienteRepository` (`nil`-safe, copia defensiva) y `PacienteFirestoreRepo` (reutilizando `obtenerControlExistente`).
+  - `GetControlPacienteByID` (`200 OK` / `404`) y `PatchControlPaciente` (actualiza solo campos presentes: `fecha`, `peso`, `porcentaje_grasa`, `notas`, con validación estricta de tipos JSON y recálculo de `IMC`), registrados en `SetupRoutes` después de `/resumen` y `/export`.
+  - Tests: `TestGetControlPacienteByIDOK`, `TestGetControlPacienteByIDErrores`, `TestPatchControlPacienteOK`, `TestPatchControlPacienteErrores`, `TestMockGetControlByID` y `TestFirestoreRepoGetControlByID` (113 tests top-level en verde).
+  - Commit: `db52369 feat: consulta puntual y actualización parcial de controles clínicos (GET/PATCH)`.
+- **Verificación de CI en GitHub Actions**: corrida `44898033376` sobre `main` (`46e9d59`) completada en verde (`1m26s`, incluyendo `-race`), con advertencia de deprecación de Node.js 20 en `actions/checkout@v4` y `actions/setup-go@v5`.
+
+### 6.21 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -383,6 +402,10 @@ go vet ./...                     # Verificación estándar
 24. **Preservación de fecha histórica en `PUT /pacientes/:id/controles/:controlId`**: cuando el cliente edita peso, grasa o notas omitiendo `fecha` (`control.Fecha.IsZero()`), ambos adaptadores conservan `existing.Fecha` en vez de pisarla con `0001-01-01` o `time.Now()`, evitando corromper el orden cronológico y `GetResumenControlesPaciente`.
 25. **Limitación local de `-race` en Windows y validación en CI Linux**: `go test -race` requiere CGO/`gcc`, ausente en este entorno Windows; por ello `.github/workflows/ci.yml` corre en `ubuntu-latest` y `go.mod` fue actualizado con `go mod tidy` para declarar `google.golang.org/grpc` y `google.golang.org/protobuf` como dependencias directas.
 26. **Bloqueo externo de Opción 3 (`review-readability` en `models.json`)**: se constató que `C:\Users\alvar\.pi\agent\models.json` solo configura `providers` (`strata`/`ollama`) y carece de claves de lentes RDD; al pertenecer a configuración externa del host fuera del repositorio, queda documentado como ajuste manual del entorno RDD.
+27. **Testabilidad determinista del `graceful shutdown` en `main.go`**: separar `newEcho`, `newServer`, `serve(ctx, srv, ln, timeout)` y `runServer` permitió probar peticiones reales y apagado ordenado sobre `127.0.0.1:0` drenando `errCh` (buffer `1`) tras `srv.Shutdown`, sin puertos fijos ni fugas de goroutines (`50/50` iteraciones en verde).
+28. **Precedencia estática de `/resumen` y `/export` frente a `GET /pacientes/:id/controles/:controlId`**: al compartir método `GET` y profundidad de segmentos, la ruta paramétrica `:controlId` se registró explícitamente después de `/resumen` y `/export` y quedó cubierta en `TestGetControlPacienteByIDOK`.
+29. **Validación estricta de tipos JSON en `PatchControlPaciente`**: al deserializar en `map[string]any`, validar cada campo con type assertion seguro (`ok`) evita panics ante tipos inesperados y devuelve `400 Bad Request` explícito; también dejó en evidencia el type assertion directo `notas.(string)` pendiente de endurecer en `PatchPaciente`.
+30. **Advertencia de Node.js 20 en GitHub Actions**: la primera corrida verde de CI (`44898033376`, `1m26s`) confirmó `go test -race` en Linux y mostró un aviso de deprecación de Node.js 20 en `actions/checkout@v4` y `actions/setup-go@v5`.
 
 ## 7. Convenciones de entrega
 
