@@ -721,6 +721,29 @@ func GetControlPacienteByID(c echo.Context, repo firestore.PacienteRepository) e
 	return c.JSON(http.StatusOK, control)
 }
 
+// GetUltimoControlPaciente devuelve el control clínico más reciente de un paciente activo.
+func GetUltimoControlPaciente(c echo.Context, repo firestore.PacienteRepository) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
+	}
+
+	ctx := c.Request().Context()
+	if _, err := repo.GetByID(ctx, id); err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
+	}
+
+	controles, err := repo.GetControles(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener controles clínicos"})
+	}
+	if len(controles) == 0 {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontraron controles clínicos para el paciente con ID " + id})
+	}
+
+	return c.JSON(http.StatusOK, controles[len(controles)-1])
+}
+
 // PatchControlPaciente aplica una actualización parcial sobre un control clínico puntual de un paciente activo.
 // Solo modifica los campos enviados en el body (fecha, peso, porcentaje_grasa, notas) y recalcula el IMC.
 func PatchControlPaciente(c echo.Context, repo firestore.PacienteRepository) error {
@@ -1231,6 +1254,12 @@ func SetupRoutes(e *echo.Echo, repo firestore.PacienteRepository) {
 	})
 	e.GET("/pacientes/{id}/controles/export", func(c echo.Context) error {
 		return ExportControlesPacienteCSV(c, repo)
+	})
+	e.GET("/pacientes/:id/controles/ultimo", func(c echo.Context) error {
+		return GetUltimoControlPaciente(c, repo)
+	})
+	e.GET("/pacientes/{id}/controles/ultimo", func(c echo.Context) error {
+		return GetUltimoControlPaciente(c, repo)
 	})
 	e.GET("/pacientes/:id/controles/:controlId", func(c echo.Context) error {
 		return GetControlPacienteByID(c, repo)

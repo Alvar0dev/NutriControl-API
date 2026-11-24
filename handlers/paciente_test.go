@@ -3259,3 +3259,122 @@ func TestPatchControlPacienteErrores(t *testing.T) {
 		})
 	}
 }
+
+// TestGetUltimoControlPacienteOK verifica la obtención del control más reciente sin depender del orden de inserción
+// y sin colisión de rutas con /controles/:controlId o /controles/resumen.
+func TestGetUltimoControlPacienteOK(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	paciente, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Ultimo Control",
+		Edad:   32,
+		Peso:   80.0,
+		Altura: 1.80,
+	})
+	require.NoError(t, err)
+
+	f1 := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
+	f2 := time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
+	f3 := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
+
+	c3, err := repo.AddControl(context.Background(), paciente.ID, models.ControlClinico{
+		Fecha: f3, Peso: 76.0, PorcentajeGrasa: 17.5, IMC: 23.46, Notas: "Mas reciente",
+	})
+	require.NoError(t, err)
+	c1, err := repo.AddControl(context.Background(), paciente.ID, models.ControlClinico{
+		Fecha: f1, Peso: 80.0, PorcentajeGrasa: 20.0, IMC: 24.69, Notas: "Primero",
+	})
+	require.NoError(t, err)
+	c2, err := repo.AddControl(context.Background(), paciente.ID, models.ControlClinico{
+		Fecha: f2, Peso: 78.0, PorcentajeGrasa: 18.8, IMC: 24.07, Notas: "Intermedio",
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/pacientes/"+paciente.ID+"/controles/ultimo", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var ultimo models.ControlClinico
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &ultimo))
+	assert.Equal(t, c3.ID, ultimo.ID)
+	assert.Equal(t, paciente.ID, ultimo.PacienteID)
+	assert.True(t, ultimo.Fecha.Equal(f3))
+	assert.Equal(t, 76.0, ultimo.Peso)
+	assert.Equal(t, 17.5, ultimo.PorcentajeGrasa)
+	assert.Equal(t, 23.46, ultimo.IMC)
+	assert.Equal(t, "Mas reciente", ultimo.Notas)
+
+	// Si se elimina c3, /ultimo debe devolver c2
+	require.NoError(t, repo.DeleteControl(context.Background(), paciente.ID, c3.ID))
+	reqPostDel := httptest.NewRequest(http.MethodGet, "/pacientes/"+paciente.ID+"/controles/ultimo", nil)
+	recPostDel := httptest.NewRecorder()
+	e.ServeHTTP(recPostDel, reqPostDel)
+	require.Equal(t, http.StatusOK, recPostDel.Code)
+	var nuevoUltimo models.ControlClinico
+	require.NoError(t, json.Unmarshal(recPostDel.Body.Bytes(), &nuevoUltimo))
+	assert.Equal(t, c2.ID, nuevoUltimo.ID)
+
+	// Confirmar que GET /controles/:controlId sigue resolviendo para c1
+	reqByID := httptest.NewRequest(http.MethodGet, "/pacientes/"+paciente.ID+"/controles/"+c1.ID, nil)
+	recByID := httptest.NewRecorder()
+	e.ServeHTTP(recByID, reqByID)
+	assert.Equal(t, http.StatusOK, recByID.Code)
+}
+
+// TestGetUltimoControlPacienteErrores verifica table-driven los rechazos 404 cuando no hay controles,
+// cuando el paciente no existe o cuando fue dado de baja lógica.
+func TestGetUltimoControlPacienteErrores(t *testing.T) {
+	casos := []struct {
+		name          string
+		setup         func(t *testing.T, repo *firestore.MockPacienteRepository) string
+		expectedError string
+	}{
+		{
+			name: "paciente sin controles",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) string {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Sin Controles", Edad: 29, Peso: 70})
+				require.NoError(t, err)
+				return p.ID
+			},
+			expectedError: "controles clínicos",
+		},
+		{
+			name: "paciente inexistente",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) string {
+				return "no-existe"
+			},
+			expectedError: "paciente",
+		},
+		{
+			name: "paciente soft deleted con controles",
+			setup: func(t *testing.T, repo *firestore.MockPacienteRepository) string {
+				p, err := repo.Create(context.Background(), models.Paciente{Nombre: "Soft Del", Edad: 30, Peso: 70})
+				require.NoError(t, err)
+				_, err = repo.AddControl(context.Background(), p.ID, models.ControlClinico{Fecha: time.Now().UTC(), Peso: 70, PorcentajeGrasa: 20})
+				require.NoError(t, err)
+				require.NoError(t, repo.Delete(context.Background(), p.ID))
+				return p.ID
+			},
+			expectedError: "paciente",
+		},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			repo := firestore.NewMockPacienteRepository()
+			SetupRoutes(e, repo)
+
+			pacienteID := tc.setup(t, repo)
+			req := httptest.NewRequest(http.MethodGet, "/pacientes/"+pacienteID+"/controles/ultimo", nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusNotFound, rec.Code)
+			assert.Contains(t, rec.Body.String(), tc.expectedError)
+		})
+	}
+}
