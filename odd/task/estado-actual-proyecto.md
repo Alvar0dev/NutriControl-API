@@ -52,6 +52,8 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T31 | S1 | inline | done | `b3df81f` ci: agregar workflow de GitHub Actions con vet, test -race y build |
 | T32 | S1 | inline | done | `161afbf` feat: hardening HTTP, PORT por env var, middlewares y graceful shutdown en main.go |
 | T33 | S1 | inline | done | `db52369` feat: consulta puntual y actualización parcial de controles clínicos (GET/PATCH) |
+| T34 | S1 | inline | done | `894c816` ci: actualizar checkout y setup-go a v7 (Node 24) y sumar cobertura |
+| T35 | S1 | inline | done | `c89e0f5` feat: endpoint GET /pacientes/:id/controles/ultimo |
 
 ## Log
 
@@ -212,6 +214,15 @@ L33: [asistente] Implementadas test-first la Opción 1 (`161afbf`) y la Opción 
 L34: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
 L34: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.18 (testabilidad determinista de `graceful shutdown` con `net.Listener` efímero y `errCh` bufferizado, orden de middlewares `RequestID`→`Logger`→`Recover`, precedencia estática de `/resumen` y `/export` frente a `GET .../controles/:controlId`, validación estricta de tipos JSON en `PatchControlPaciente` y hallazgo de `notas.(string)` en `PatchPaciente`, más verificación de CI `44898033376` con aviso Node.js 20) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md`, `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: `BodyLimit`, `CORS` configurable y endurecer `PatchPaciente` contra tipos JSON inválidos; Opción 2: actualizar acciones CI a Node.js 24 y sumar `-cover` en `.github/workflows/ci.yml`; Opción 3: endpoint `GET /pacientes/:id/controles/ultimo` para consulta rápida del último control clínico).
+
+L35: [usuario] "haz opcion 2 y 3"
+L35: [asistente] Implementadas test-first la Opción 2 (`894c816`) y la Opción 3 (`c89e0f5`) en v1.0.19:
+- Opción 2 (`894c816`): actualizado `.github/workflows/ci.yml` a `actions/checkout@v7` (`v7.0.1`) y `actions/setup-go@v7` (`v7.1.0`, runtime `node24` verificado vía `gh api`), y añadido `-cover` en `go test -race -cover -count=1 ./...`. Verificación independiente read-only `PASS` (riesgo ítem 5).
+- Opción 3 (`c89e0f5`): implementado test-first `GetUltimoControlPaciente` (`GET /pacientes/:id/controles/ultimo`) en `handlers/paciente.go` y registrado en `SetupRoutes` antes de `:controlId` (tras observar RED donde Echo capturaba `"ultimo"` como `:controlId`), devolviendo `404` cuando paciente o controles faltan y `200 OK` con el control cronológicamente más reciente. Agregados `TestGetUltimoControlPacienteOK` y `TestGetUltimoControlPacienteErrores` (`115` tests top-level en verde; cobertura `nutricontrol` `45.0%`, `handlers` `87.7%`, `pkg/firestore` `85.0%`).
+
+L36: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L36: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.19 (colisión Echo v4 en RED con `:controlId`, semántica `404` ante 0 controles frente a struct cero, y verificación de `node24` en `checkout@v7` y `setup-go@v7` vía `gh api`) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (3.2, 6, 6.21 y dificultades 31-33 en 6.22), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: `BodyLimit`, `CORS` configurable y endurecer tipos JSON en `PatchPaciente` — `notas.(string)` sin `, ok`; Opción 2: filtrado opcional `?desde=&hasta=` en `GET /pacientes/:id/controles/resumen` reutilizando `obtenerControlesFiltrados`; Opción 3: verificar corrida de CI v7 sin aviso Node 20 y añadir `Dockerfile` multi-stage minimalista para despliegue).
 
 
 

@@ -82,6 +82,7 @@ Lee env vars: `PORT` (default `:8080`), `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJE
 | GET | `/pacientes/{id}/controles` | GetControlesPaciente | GetByID + GetControles + filtro `?desde=&hasta=` y paginación `?limit=&offset=` | 200 OK `[ControlClinico]` / 400 / 404 |
 | GET | `/pacientes/{id}/controles/resumen` | GetResumenControlesPaciente | GetByID + GetControles | 200 OK `ResumenControles` / 404 |
 | GET | `/pacientes/{id}/controles/export` | ExportControlesPacienteCSV | GetByID + GetControles + filtro `?desde=&hasta=` | 200 OK `text/csv` (`attachment; filename="controles.csv"`) / 400 / 404 |
+| GET | `/pacientes/{id}/controles/ultimo` | GetUltimoControlPaciente | GetByID + GetControles | 200 OK `ControlClinico` / 404 |
 | GET | `/pacientes/{id}/controles/{controlId}` | GetControlPacienteByID | GetByID + GetControlByID | 200 OK `ControlClinico` / 404 |
 | POST | `/pacientes/{id}/controles` | CreateControlPaciente | AddControl | 201 Created `ControlClinico` / 400 / 404 |
 | PUT | `/pacientes/{id}/controles/{controlId}` | UpdateControlPaciente | UpdateControl | 200 OK `ControlClinico` / 400 / 404 |
@@ -192,9 +193,9 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `RequestID`/`Logger`/`Recover`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`), CRUD completo de controles clínicos (`GET/POST /pacientes/:id/controles`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
-| Tests | `go test -count=1 ./...` verde (113 tests top-level en `nutricontrol`, `handlers`, `models`, `pkg/firestore`). |
-| Build / CI | `go build ./...` y `go vet ./...` OK. Workflow CI `.github/workflows/ci.yml` validado en GitHub Actions (run `44898033376` en verde con `-race`). |
+| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `RequestID`/`Logger`/`Recover`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`), CRUD completo de controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/ultimo`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
+| Tests | `go test -cover -count=1 ./...` verde (115 tests top-level: `nutricontrol` 45.0%, `handlers` 87.7%, `models` [no statements], `pkg/firestore` 85.0%). |
+| Build / CI | `go build ./...` y `go vet ./...` OK. Workflow CI `.github/workflows/ci.yml` en `actions/checkout@v7` + `actions/setup-go@v7` (Node.js 24) con `go test -race -cover -count=1 ./...`. |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente. `feature-c4-search.md` y `feature-b-paginacion-firestore.md` archivados en `odd/tasks/archive/`. |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
@@ -374,7 +375,17 @@ go vet ./...                     # Verificación estándar
   - Commit: `db52369 feat: consulta puntual y actualización parcial de controles clínicos (GET/PATCH)`.
 - **Verificación de CI en GitHub Actions**: corrida `44898033376` sobre `main` (`46e9d59`) completada en verde (`1m26s`, incluyendo `-race`), con advertencia de deprecación de Node.js 20 en `actions/checkout@v4` y `actions/setup-go@v5`.
 
-### 6.21 Dificultades acumuladas y decisiones de diseño
+### 6.21 Feature: CI v7 con Node.js 24 + cobertura y endpoint `GET /pacientes/:id/controles/ultimo` (v1.0.19)
+
+- **Actualización de CI (`.github/workflows/ci.yml`)**:
+  - Migrado de `actions/checkout@v4` y `actions/setup-go@v5` a `actions/checkout@v7` (`v7.0.1`) y `actions/setup-go@v7` (`v7.1.0`, runtime `node24` verificado vía `gh api`), e incorporado `-cover` en `go test -race -cover -count=1 ./...`.
+  - Commit: `894c816 ci: actualizar checkout y setup-go a v7 (Node 24) y sumar cobertura`.
+- **Consulta rápida del último control (`GET /pacientes/:id/controles/ultimo`)**:
+  - Handler `GetUltimoControlPaciente` en `handlers/paciente.go`: valida `id` (`400`), paciente activo (`404`), obtiene historial cronológico (`repo.GetControles`), responde `404` si aún no existen controles y `200 OK` con `controles[len(controles)-1]`. Registrado en `SetupRoutes` antes de `:controlId`.
+  - Tests: `TestGetUltimoControlPacienteOK` y `TestGetUltimoControlPacienteErrores` (`115` tests top-level en verde).
+  - Commit: `c89e0f5 feat: endpoint GET /pacientes/:id/controles/ultimo`.
+
+### 6.22 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -406,6 +417,9 @@ go vet ./...                     # Verificación estándar
 28. **Precedencia estática de `/resumen` y `/export` frente a `GET /pacientes/:id/controles/:controlId`**: al compartir método `GET` y profundidad de segmentos, la ruta paramétrica `:controlId` se registró explícitamente después de `/resumen` y `/export` y quedó cubierta en `TestGetControlPacienteByIDOK`.
 29. **Validación estricta de tipos JSON en `PatchControlPaciente`**: al deserializar en `map[string]any`, validar cada campo con type assertion seguro (`ok`) evita panics ante tipos inesperados y devuelve `400 Bad Request` explícito; también dejó en evidencia el type assertion directo `notas.(string)` pendiente de endurecer en `PatchPaciente`.
 30. **Advertencia de Node.js 20 en GitHub Actions**: la primera corrida verde de CI (`44898033376`, `1m26s`) confirmó `go test -race` en Linux y mostró un aviso de deprecación de Node.js 20 en `actions/checkout@v4` y `actions/setup-go@v5`.
+31. **Colisión de Echo v4 entre `/controles/ultimo` y `/controles/:controlId` en RED**: antes de registrar la ruta estática `/ultimo` antes de `/:controlId`, Echo enrutaba `"ultimo"` como `:controlId` devolviendo `404` de `GetControlPacienteByID`; registrar `/ultimo` justo tras `/export` elimina la colisión.
+32. **`404 Not Found` ante paciente activo sin controles en `/controles/ultimo`**: devolver un struct cero en `200 OK` crearía registros sintéticos inválidos; retornar `404` explícito mantiene coherencia REST con `GET /controles/:controlId`.
+33. **Verificación de `node24` en `checkout@v7` y `setup-go@v7` vía `gh api`**: se comprobaron las etiquetas reales (`v7.0.1`, `v7.1.0`) y sus `action.yml` antes de actualizar `.github/workflows/ci.yml`, preservando `go-version-file: go.mod` y añadiendo `-cover`.
 
 ## 7. Convenciones de entrega
 

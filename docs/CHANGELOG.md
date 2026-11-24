@@ -1,5 +1,26 @@
 # CHANGELOG.md
 
+## Versión 1.0.19 - 2026-11-24
+
+### Actualización de CI a Node.js 24 con reporte de cobertura y endpoint `GET /pacientes/:id/controles/ultimo`
+
+- **Pipeline CI en GitHub Actions (`.github/workflows/ci.yml`)**:
+  - Actualizados `actions/checkout@v4` → `actions/checkout@v7` (`v7.0.1`) y `actions/setup-go@v5` → `actions/setup-go@v7` (`v7.1.0`), tras verificar vía `gh api` sus `action.yml` confirmando runtime `node24` y compatibilidad con `go-version-file: go.mod`, eliminando el aviso de deprecación de Node.js 20.
+  - Añadido `-cover` al paso de tests: `go test -race -cover -count=1 ./...`.
+  - Commit: `894c816 ci: actualizar checkout y setup-go a v7 (Node 24) y sumar cobertura`.
+- **Nuevo endpoint `GET /pacientes/:id/controles/ultimo` (`handlers/paciente.go`)**:
+  - Handler `GetUltimoControlPaciente`: valida `id` (`400`), verifica paciente activo (`404`, excluyendo registros soft-deleted), obtiene controles cronológicos vía `repo.GetControles` (`500` ante fallo del repositorio), responde `404 Not Found` explícito si el paciente aún no tiene controles registrados (`"No se encontraron controles clínicos para el paciente con ID " + id`) y devuelve `200 OK` con `controles[len(controles)-1]`.
+  - Rutas `/pacientes/:id/controles/ultimo` y `/pacientes/{id}/controles/ultimo` registradas en `SetupRoutes` antes de `/pacientes/:id/controles/:controlId` y `/pacientes/{id}/controles/{controlId}`.
+  - Tests nuevos en `handlers/paciente_test.go`: `TestGetUltimoControlPacienteOK` (orden cronológico independiente de inserción, actualización tras borrar el más reciente y no colisión con `:controlId`) y `TestGetUltimoControlPacienteErrores` (table-driven: paciente sin controles, inexistente y soft-deleted) — `115` tests top-level en verde (`nutricontrol` `45.0%`, `handlers` `87.7%`, `pkg/firestore` `85.0%`).
+  - Commit: `c89e0f5 feat: endpoint GET /pacientes/:id/controles/ultimo`.
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Colisión de Echo v4 entre `/controles/ultimo` y `/controles/:controlId` durante la fase RED.** Al correr `TestGetUltimoControlPaciente` antes de registrar la ruta estática `/ultimo`, Echo v4 capturó `"ultimo"` como parámetro `:controlId` llamando a `GetControlPacienteByID` y devolviendo `404` con `"No se encontró control clínico con ID ultimo"`. Ubicar `/pacientes/:id/controles/ultimo` inmediatamente después de `/export` y antes de `/:controlId` garantizó la prioridad estática del router.
+2. **Respuesta `404` frente a struct cero cuando un paciente activo no tiene controles.** A diferencia de `GET /pacientes/:id/controles/resumen` (un agregado estadístico donde `total_controles: 0` es válido), `/ultimo` representa un único recurso `ControlClinico`. Devolver `200 OK` con un struct vacío (`0001-01-01T00:00:00Z`, `peso: 0`) induciría datos clínicos falsos en consumidores; responder `404 Not Found` con mensaje explícito mantiene coherencia REST con `GET /controles/:controlId`.
+3. **Verificación contractual de runtime Node.js 24 en acciones de GitHub antes de actualizar el workflow.** En lugar de adivinar tags mayores de `actions/checkout` y `actions/setup-go`, se consultaron los últimos releases (`v7.0.1` y `v7.1.0`) y sus `action.yml` reales vía `gh api`, confirmando `runs.using: node24` y preservación de `go-version-file: go.mod`, validado además por verificación independiente read-only (`PASS`).
+
+---
 ## Versión 1.0.18 - 2026-11-23
 
 ### Hardening HTTP y ciclo de vida en `main.go`, consulta/edición parcial de controles (`GET/PATCH /pacientes/:id/controles/:controlId`) y verificación de CI

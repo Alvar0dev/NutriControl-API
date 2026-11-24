@@ -47,11 +47,14 @@
 - [done] Opción 2: Consulta puntual y actualización parcial de control clínico (GET/PATCH /pacientes/:id/controles/:controlId) (v1.0.18) (commit db52369)
 - [done] Opción 3 (CI): Verificada primera ejecución de .github/workflows/ci.yml en GitHub Actions (run 44898033376 PASS en 1m26s con go test -race; ajuste manual RDD sigue fuera del repo)
 - [done] Documentar dificultades y decisiones de diseño v1.0.18 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
+- [done] Opción 2: Actualizar acciones en .github/workflows/ci.yml a v7 (Node.js 24) y añadir go test -race -cover -count=1 ./... (commit 894c816)
+- [done] Opción 3: Endpoint GET /pacientes/:id/controles/ultimo para consulta rápida del control clínico más reciente (v1.0.19) (commit c89e0f5)
+- [done] Documentar dificultades y decisiones de diseño v1.0.19 en CHANGELOG, PROJECT_INDEX, AGENTS.md y estado ODD
 - [pending] Opción 1: Hardening de entrada HTTP (middleware BodyLimit y CORS configurable en main.go) y endurecimiento de tipos JSON en PatchPaciente (corregir type assertion notas.(string) sin ok)
-- [pending] Opción 2: Actualizar acciones en .github/workflows/ci.yml a versiones compatibles con Node.js 24 (eliminar aviso de deprecación de Node.js 20) y añadir go test -race -cover ./...
-- [pending] Opción 3: Endpoint GET /pacientes/:id/controles/ultimo para consulta rápida del control clínico más reciente
+- [pending] Opción 2: Filtrado temporal opcional (?desde=&hasta=) en GET /pacientes/:id/controles/resumen reutilizando obtenerControlesFiltrados
+- [pending] Opción 3: Verificar corrida de CI v7 en GitHub (Node.js 24 sin avisos y cobertura) y añadir Dockerfile multi-stage minimalista para despliegue
 
-=== Estado actual (2026-11-23) ===
+=== Estado actual (2026-11-24) ===
 
-Estado git: rama main sincronizada con origin/main (113 tests top-level en verde en nutricontrol, handlers, models y pkg/firestore; go vet y go build OK; CI verificado en verde en GitHub Actions run 44898033376).
-Pendientes: Opción 1 (BodyLimit/CORS y hardening de tipos en PatchPaciente), Opción 2 (CI Node.js 24 + cobertura) y Opción 3 (GET /pacientes/:id/controles/ultimo).
+Estado git: rama main sincronizada con origin/main (115 tests top-level en verde en nutricontrol, handlers, models y pkg/firestore; cobertura 45.0% / 87.7% / 85.0%; go vet y go build OK; CI actualizado a v7 con Node.js 24 + -cover).
+Pendientes: Opción 1 (BodyLimit/CORS y hardening de tipos en PatchPaciente), Opción 2 (resumen evolutivo con ?desde=&hasta=) y Opción 3 (verificar corrida CI v7 y Dockerfile multi-stage).
