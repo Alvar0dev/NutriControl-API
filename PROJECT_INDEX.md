@@ -42,6 +42,7 @@ nutricontrol/
 ├── docs/
 │   ├── constitution.md            # Principios innegociables (hexagonal, testing, minimalismo).
 │   ├── CHANGELOG.md               # Historia de cambios contractuales.
+│   ├── arquitectura-y-defensa.md  # Decisiones de arquitectura y guía Q&A de defensa técnica.
 │   └── organizacion-documentacion.md  # Mapa de esta documentación y porqué.
 └── odd/
     ├── task/
@@ -58,12 +59,12 @@ nutricontrol/
 
 ### 3.1 Arranque — `main.go`
 
-Lee env vars: `PORT` (default `:8080`), `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
+Lee env vars: `PORT` (default `:8080`), `BODY_LIMIT` (default `"1M"`), `CORS_ALLOWED_ORIGINS` (opcional, separado por comas; desactivado por defecto), `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 
 - Si mock → `firestore.NewMockPacienteRepository()`.
 - Si real → `firestore.NewPacienteFirestoreRepo(ctx, projectID)` (falla abiertamente si no hay credenciales GCP).
-- Construye Echo vía `newEcho(repo)` (middlewares `RequestID`, `Logger`, `Recover`, `handlers.SetupRoutes(e, repo)` y `GET /`).
-- Arranca `*http.Server` (`newServer`) con timeouts explícitos (`ReadHeaderTimeout: 5s`, `ReadTimeout: 15s`, `WriteTimeout: 15s`, `IdleTimeout: 60s`) y apagado ordenado (`runServer` / `serve`) ante `SIGINT`/`SIGTERM` con timeout de `10s`.
+- Construye Echo vía `loadServerConfig()` + `newEchoWithConfig(repo, cfg)` (`strictJSONSerializer{}`, middlewares `RequestID` → `Logger` → `Recover` → `CORSWithConfig` opcional → `BodyLimit`, `handlers.SetupRoutes(e, repo)` y `GET /`).
+- Arranca `*http.Server` (`newServerWithConfig`) con timeouts explícitos (`ReadHeaderTimeout: 5s`, `ReadTimeout: 15s`, `WriteTimeout: 15s`, `IdleTimeout: 60s`) y apagado ordenado (`runServer` / `serve`) ante `SIGINT`/`SIGTERM` con timeout de `10s`.
 
 ### 3.2 Rutas (contrato API)
 
@@ -185,6 +186,8 @@ go vet ./...                     # Verificación estándar
 | Variable | Obligatorio | Valor | Propósito |
 |----------|-------------|-------|-----------|
 | `PORT` | No | `8080` o `:8080` | Puerto de escucha HTTP (default `:8080`). |
+| `BODY_LIMIT` | No | `1M`, `512K`, `2M` | Límite máximo de payload JSON/HTTP (`413`, default `1M`). |
+| `CORS_ALLOWED_ORIGINS` | No | `http://localhost:3000,...` | Orígenes CORS permitidos separados por coma (desactivado si vacío). |
 | `NUTRICONTROL_USE_MOCK` | No | `true` | Forzar mock en memoria. |
 | `GCP_PROJECT_ID` | No | `<id>` | ID proyecto GCP para Firestore real. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | `/path/cred.json` | Credenciales de servicio GCP. |
@@ -193,8 +196,8 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `RequestID`/`Logger`/`Recover`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`), CRUD completo de controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/ultimo`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
-| Tests | `go test -cover -count=1 ./...` verde (115 tests top-level: `nutricontrol` 45.0%, `handlers` 87.7%, `models` [no statements], `pkg/firestore` 85.0%). |
+| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `BODY_LIMIT`, `CORS_ALLOWED_ORIGINS`, `strictJSONSerializer`, `RequestID`/`Logger`/`Recover`/`CORS`/`BodyLimit`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`, `PatchPaciente` con validación estricta de tipos) y controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/ultimo`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
+| Tests | `go test -cover -count=1 ./...` verde (122 tests top-level: `nutricontrol` 59.1%, `handlers` 88.1%, `models` [no statements], `pkg/firestore` 85.0%). |
 | Build / CI | `go build ./...` y `go vet ./...` OK. Workflow CI `.github/workflows/ci.yml` en `actions/checkout@v7` + `actions/setup-go@v7` (Node.js 24) con `go test -race -cover -count=1 ./...`. |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente. `feature-c4-search.md` y `feature-b-paginacion-firestore.md` archivados en `odd/tasks/archive/`. |
@@ -385,7 +388,19 @@ go vet ./...                     # Verificación estándar
   - Tests: `TestGetUltimoControlPacienteOK` y `TestGetUltimoControlPacienteErrores` (`115` tests top-level en verde).
   - Commit: `c89e0f5 feat: endpoint GET /pacientes/:id/controles/ultimo`.
 
-### 6.22 Dificultades acumuladas y decisiones de diseño
+### 6.22 Feature: Hardening HTTP (`BodyLimit`, `CORS`), `strictJSONSerializer` y tipos estrictos en `PatchPaciente` (v1.0.20)
+
+- **Hardening de entrada HTTP (`main.go`, `main_test.go`, `go.mod`)**:
+  - Configurables vía env vars (`BODY_LIMIT` default `"1M"` validado con `gommon/bytes.Parse`, `CORS_ALLOWED_ORIGINS` separado por coma y desactivado por defecto con `AllowCredentials: false`).
+  - Orden en `newEchoWithConfig`: `RequestID` → `Logger` → `Recover` → `CORSWithConfig` (opcional) → `BodyLimit`, con `strictJSONSerializer` (`io.ReadAll` + `json.Unmarshal`).
+  - Tests: `TestResolveBodyLimit`, `TestParseCORSOrigins`, `TestLoadServerConfig`, `TestNewEchoBodyLimit` (streaming `ContentLength = -1` en los 7 endpoints de escritura), `TestNewEchoCORS` y `TestStrictJSONSerializerDeserializePropaga413`.
+- **Endurecimiento de `PatchPaciente` y lectura JSON (`handlers/paciente.go`, `handlers/paciente_test.go`)**:
+  - Helpers compartidos `manejarBindError`, `bindJSONStrict`, `leerBodyPatchJSON`, `extraerStringJSON` y `extraerFloatJSON`.
+  - `PatchPaciente` rechaza `null`, decimales en `edad`, `NaN`/`Inf` y cualquier tipo erróneo en `nombre`, `edad`, `peso`, `porcentaje_grasa`, `altura` y `notas` (`400`, sin panic en `notas`).
+  - Test: `TestPatchPacienteTiposInvalidos` (`122` tests top-level en verde; cobertura `59.1%` / `88.1%` / `85.0%`).
+  - Commits: `32e92d3 fix: endurecer tipos JSON en PatchPaciente y lectura estricta bindJSONStrict` y `86e94d9 feat: agregar BodyLimit, CORS configurable y strictJSONSerializer en main.go`.
+
+### 6.23 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -420,6 +435,9 @@ go vet ./...                     # Verificación estándar
 31. **Colisión de Echo v4 entre `/controles/ultimo` y `/controles/:controlId` en RED**: antes de registrar la ruta estática `/ultimo` antes de `/:controlId`, Echo enrutaba `"ultimo"` como `:controlId` devolviendo `404` de `GetControlPacienteByID`; registrar `/ultimo` justo tras `/export` elimina la colisión.
 32. **`404 Not Found` ante paciente activo sin controles en `/controles/ultimo`**: devolver un struct cero en `200 OK` crearía registros sintéticos inválidos; retornar `404` explícito mantiene coherencia REST con `GET /controles/:controlId`.
 33. **Verificación de `node24` en `checkout@v7` y `setup-go@v7` vía `gh api`**: se comprobaron las etiquetas reales (`v7.0.1`, `v7.1.0`) y sus `action.yml` antes de actualizar `.github/workflows/ci.yml`, preservando `go-version-file: go.mod` y añadiendo `-cover`.
+34. **Propagación de `413` en streaming (`strictJSONSerializer` y `bindJSONStrict`) entre Go `1.26` y `1.27`**: en `encoding/json` v1 (Go `<= 1.26`, versión en `go.mod` y CI), `json.Decoder` escanea el buffer antes de revisar errores de lectura, pudiendo descartar `echo.ErrStatusRequestEntityTooLarge` si el JSON cierra en el mismo `Read` (enmascarado localmente bajo Go `1.27.2` con `json/v2`). Reemplazar la decodificación streaming por `io.ReadAll` + `json.Unmarshal` y probar `partialLimitReader` garantiza `413` en ambas versiones.
+35. **Validación preventiva de `BODY_LIMIT` y CORS seguro por defecto**: validar `BODY_LIMIT` con `bytes.Parse` evita el `panic` de `middleware.BodyLimit` ante valores inválidos o `<= 0`, mientras que omitir `CORSWithConfig` cuando `CORS_ALLOWED_ORIGINS` está vacío evita el wildcard `*` predeterminado de Echo.
+36. **Endurecimiento uniforme de `PatchPaciente` con `extraerStringJSON` y `extraerFloatJSON`**: reemplaza el type assertion inseguro `notas.(string)`, rechaza `null`, decimales en `edad` y tipos erróneos que antes devolvían `200 OK` sin aplicar cambios.
 
 ## 7. Convenciones de entrega
 

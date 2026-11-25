@@ -22,6 +22,7 @@ De esto se deriva que **no todos los documentos son necesarios siempre**. Solo s
 | `README.md` | Bitácora histórica día a día de lo hecho, dificultades y soluciones. | **No editar por sesión.** Es memoria histórica, no documentación operativa. |
 | `docs/constitution.md` | Principios innegociables del proyecto (hexagonal, testing purista, minimalismo). | Solo cuando cambian los principios. |
 | `docs/CHANGELOG.md` | Historia de cambios contractuales. | Solo al cerrar versiones o hitos. |
+| `docs/arquitectura-y-defensa.md` | Porqué arquitectónico, decisiones/tradeoffs y guía Q&A para defensa técnica del proyecto. | Solo cuando cambian decisiones arquitectónicas clave. |
 | `odd/task/estado-actual-proyecto.md` | **Único archivo de definición de estado actual** del proyecto (contrato ODD S3). Punto de partida para la siguiente sesión. | Solo cuando cambia el estado base del proyecto. |
 | `odd/tasks/<feature>.md` | Documento de **feature tracking** para trabajos grandes. Se crea antes del primer write y se cierra al terminar la feature. | Solo durante una feature activa y grande. |
 | `odd/tasks/archive/` | Feature trackings ya cerrados (ej. `000-reestructuracion-documental.md`). Se mueven aquí al terminar; no se editan. | Nunca. |

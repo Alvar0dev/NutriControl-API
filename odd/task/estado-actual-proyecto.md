@@ -54,6 +54,9 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T33 | S1 | inline | done | `db52369` feat: consulta puntual y actualización parcial de controles clínicos (GET/PATCH) |
 | T34 | S1 | inline | done | `894c816` ci: actualizar checkout y setup-go a v7 (Node 24) y sumar cobertura |
 | T35 | S1 | inline | done | `c89e0f5` feat: endpoint GET /pacientes/:id/controles/ultimo |
+| T36 | S1 | inline | done | `32e92d3` fix: endurecer tipos JSON en PatchPaciente y lectura estricta bindJSONStrict |
+| T37 | S1 | inline | done | `86e94d9` feat: agregar BodyLimit, CORS configurable y strictJSONSerializer en main.go |
+| T38 | S1 | inline | done | `docs/arquitectura-y-defensa.md`: guía técnica de arquitectura y defensa Q&A |
 
 ## Log
 
@@ -223,6 +226,16 @@ L35: [asistente] Implementadas test-first la Opción 2 (`894c816`) y la Opción 
 L36: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
 L36: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.19 (colisión Echo v4 en RED con `:controlId`, semántica `404` ante 0 controles frente a struct cero, y verificación de `node24` en `checkout@v7` y `setup-go@v7` vía `gh api`) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (3.2, 6, 6.21 y dificultades 31-33 en 6.22), `AGENTS.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: `BodyLimit`, `CORS` configurable y endurecer tipos JSON en `PatchPaciente` — `notas.(string)` sin `, ok`; Opción 2: filtrado opcional `?desde=&hasta=` en `GET /pacientes/:id/controles/resumen` reutilizando `obtenerControlesFiltrados`; Opción 3: verificar corrida de CI v7 sin aviso Node 20 y añadir `Dockerfile` multi-stage minimalista para despliegue).
+
+L37: [usuario] "planea bien la opcion 1" → "ejecuta y registra todo porque se ha hecho asi en la documentacion"
+L37: [asistente] Implementada test-first la Opción 1 completa (`32e92d3` y `86e94d9`, v1.0.20):
+- Endurecimiento de `PatchPaciente` (`32e92d3`, `handlers/paciente.go`, `handlers/paciente_test.go`): extraídos `manejarBindError`, `bindJSONStrict`, `leerBodyPatchJSON`, `extraerStringJSON` y `extraerFloatJSON`; corregido `notas.(string)` sin `, ok` (RED confirmó panic con `{"notas":123}` y `{"notas":null}`), rechazados `null`, decimales en `edad`, `NaN`/`Inf` y tipos inválidos con `TestPatchPacienteTiposInvalidos`.
+- Hardening HTTP en `main.go` (`86e94d9`, `main_test.go`, `go.mod`): `BodyLimit` (`BODY_LIMIT`, default `"1M"` validado con `gommon/bytes.Parse`) y `CORS` configurable (`CORS_ALLOWED_ORIGINS`, desactivado por defecto con `AllowCredentials: false`).
+- Hallazgo crítico en auditoría independiente read-only (`FAIL` → fix → `PASS`): en `encoding/json` v1 (Go `<= 1.26` usado en CI), `json.Decoder` podía descartar `echo.ErrStatusRequestEntityTooLarge` en streaming (`ContentLength = -1`) cuando el JSON cierra en el mismo `Read` (oculto en Windows bajo Go `1.27.2` `json/v2`). Resuelto con `strictJSONSerializer` (`main.go`) y `bindJSONStrict` (`handlers/paciente.go`), cubriendo los 7 endpoints streaming y `partialLimitReader` en `TestStrictJSONSerializerDeserializePropaga413` (`122` tests top-level en verde: `59.1%` / `88.1%` / `85.0%`; `go test -count=50 .` OK).
+
+L38: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L38: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.20 + `docs/arquitectura-y-defensa.md` en `docs/CHANGELOG.md`, `PROJECT_INDEX.md`, `AGENTS.md`, `docs/organizacion-documentacion.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: filtrado temporal opcional `?desde=&hasta=` en `GET /pacientes/:id/controles/resumen` reutilizando `obtenerControlesFiltrados`; Opción 2: verificar corrida CI v7 con Go 1.26 en GitHub y añadir `Dockerfile` multi-stage minimalista para despliegue; Opción 3: paginación nativa/cursores en Firestore o rate limiting por IP en `main.go`).
 
 
 

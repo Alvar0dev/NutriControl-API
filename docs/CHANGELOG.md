@@ -1,5 +1,31 @@
 # CHANGELOG.md
 
+## Versión 1.0.20 - 2026-11-25
+
+### Hardening de entrada HTTP (`BodyLimit` y `CORS`), endurecimiento de tipos en `PatchPaciente` y propagación estricta de `413`
+
+- **Endurecimiento de `PatchPaciente` y unificación de helpers JSON (`handlers/paciente.go`)**:
+  - Extraídos `manejarBindError`, `bindJSONStrict`, `leerBodyPatchJSON`, `extraerStringJSON` y `extraerFloatJSON`.
+  - `PatchPaciente`: rechaza payload `null` (`400`), exige tipos JSON exactos en todos los campos (`nombre`, `edad`, `peso`, `porcentaje_grasa`, `altura`, `notas`), rechaza decimales en `edad` (`e != math.Trunc(e)`) y valores `NaN`/`Inf`, eliminando el panic de `notas.(string)` sin `, ok` y los `200 OK` silenciosos ante tipos incorrectos.
+  - `bindJSONStrict` sustituye `c.Bind` en `CreatePaciente`, `CreatePacientesBatch`, `UpdatePaciente`, `CreateControlPaciente` y `UpdateControlPaciente` para leer con `io.ReadAll` antes de decodificar JSON y propagar `413` con `manejarBindError`.
+- **Middleware `BodyLimit` y `CORS` configurable en `main.go`**:
+  - `serverConfig`, `loadServerConfig`, `resolveBodyLimit` (validando `BODY_LIMIT` con `github.com/labstack/gommon/bytes.Parse`, default `"1M"`, revirtiendo valores `<= 0` o inválidos sin panic) y `parseCORSOrigins` (`CORS_ALLOWED_ORIGINS` separado por comas).
+  - `newEchoWithConfig`: registra `RequestID` → `Logger` → `Recover` → `CORSWithConfig` (solo si `len(CORSAllowedOrigins) > 0`, `AllowCredentials: false`, seguro por defecto) → `BodyLimit`, e instala `strictJSONSerializer` en `e.JSONSerializer`.
+  - `go.mod`: `github.com/labstack/gommon v0.5.0` promovido a `require` directo vía `go mod tidy`.
+- **Tests (`handlers/paciente_test.go`, `main_test.go`)**:
+  - Agregados `TestPatchPacienteTiposInvalidos`, `TestResolveBodyLimit`, `TestParseCORSOrigins`, `TestLoadServerConfig`, `TestNewEchoBodyLimit` (cubre `Content-Length` y streaming `ContentLength = -1` en los 7 endpoints de escritura), `TestNewEchoCORS` y `TestStrictJSONSerializerDeserializePropaga413` (`122` tests top-level en verde: `nutricontrol` `59.1%`, `handlers` `88.1%`, `pkg/firestore` `85.0%`; `go test -count=50 .` OK; verificación independiente read-only `PASS`).
+- **Documentación de arquitectura y defensa (`docs/arquitectura-y-defensa.md`)**:
+  - Creada la guía técnica con mapa de capas, decisiones/tradeoffs, preguntas probables de defensa con evidencia exacta y deuda técnica vigente, enlazada en `PROJECT_INDEX.md` y `docs/organizacion-documentacion.md`.
+- Commits: `32e92d3` (`fix: endurecer tipos JSON en PatchPaciente y lectura estricta bindJSONStrict`) y `86e94d9` (`feat: agregar BodyLimit, CORS configurable y strictJSONSerializer en main.go`).
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Sustitución de `json.NewDecoder` por lectura estricta (`strictJSONSerializer` y `bindJSONStrict`) para impedir bypass de `BodyLimit` en Go `<= 1.26`.** Durante la auditoría independiente de seguridad, se detectó que `echo.DefaultJSONSerializer` usa `json.NewDecoder(req.Body).Decode`, el cual en `encoding/json` v1 (`Go <= 1.26`, versión declarada en `go.mod` y usada por el runner de CI) escanea el buffer antes de comprobar `err != nil`: si `middleware.BodyLimit` (`limitedReader.Read`) devuelve `(n, echo.ErrStatusRequestEntityTooLarge)` junto con el cierre `}`/`]` de un payload streaming (`ContentLength = -1`), `json.Decoder` podía retornar `nil` descartando el `413`. Al leer localmente con Go `1.27.2` (`json/v2` por defecto) el test pasaba igual, lo que habría ocultado la diferencia con CI. Con `strictJSONSerializer` en `main.go` y `bindJSONStrict` en `handlers/paciente.go` (más `TestStrictJSONSerializerDeserializePropaga413` usando `partialLimitReader`), se garantiza `413` determinista en ambas versiones de Go.
+2. **Validación previa de `BODY_LIMIT` para evitar `panic` al iniciar Echo.** `middleware.BodyLimit` lanza `panic` si recibe un string inválido. Validar `BODY_LIMIT` en `resolveBodyLimit` con la misma función `bytes.Parse` de Echo (y rechazar `<= 0`) asegura que una variable mal configurada registre un aviso y caiga de forma segura en `"1M"`.
+3. **CORS desactivado por defecto en lugar del `*` predeterminado de Echo.** `middleware.CORSWithConfig` con `AllowOrigins` vacío aplica por defecto `["*"]`. Condicionar su registro a `len(cfg.CORSAllowedOrigins) > 0` con `AllowCredentials: false` mantiene política restrictiva same-origin cuando `CORS_ALLOWED_ORIGINS` no está definida.
+4. **Corrección integral de `PatchPaciente` al resolver `notas.(string)`.** En la fase RED de `TestPatchPacienteTiposInvalidos` se confirmó el `panic` al recibir `{"notas": 123}`/`{"notas": null}`, junto con respuestas `200 OK` silenciosas para `null` o tipos inválidos en el resto de campos y truncamiento silencioso de decimales en `edad`. Extraer `extraerStringJSON` y `extraerFloatJSON` unificó las guardas estrictas entre `PatchPaciente` y `PatchControlPaciente`.
+
+---
 ## Versión 1.0.19 - 2026-11-24
 
 ### Actualización de CI a Node.js 24 con reporte de cobertura y endpoint `GET /pacientes/:id/controles/ultimo`
