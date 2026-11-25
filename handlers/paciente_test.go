@@ -3378,3 +3378,50 @@ func TestGetUltimoControlPacienteErrores(t *testing.T) {
 		})
 	}
 }
+
+// TestPatchPacienteTiposInvalidos verifica table-driven que tipos JSON erróneos o null devuelvan 400 sin panic ni 200 silencioso.
+func TestPatchPacienteTiposInvalidos(t *testing.T) {
+	casos := []struct {
+		name          string
+		payload       string
+		expectedError string
+	}{
+		{name: "body null", payload: `null`, expectedError: "Invalid request"},
+		{name: "nombre numerico", payload: `{"nombre":123}`, expectedError: "nombre"},
+		{name: "edad string", payload: `{"edad":"treinta"}`, expectedError: "edad"},
+		{name: "edad decimal", payload: `{"edad":30.5}`, expectedError: "edad"},
+		{name: "peso string", payload: `{"peso":"alto"}`, expectedError: "peso"},
+		{name: "porcentaje grasa string", payload: `{"porcentaje_grasa":"veinte"}`, expectedError: "porcentaje_grasa"},
+		{name: "altura string", payload: `{"altura":"1.75"}`, expectedError: "altura"},
+		{name: "notas numerico", payload: `{"notas":123}`, expectedError: "notas"},
+		{name: "notas null", payload: `{"notas":null}`, expectedError: "notas"},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			repo := firestore.NewMockPacienteRepository()
+			SetupRoutes(e, repo)
+
+			creado, err := repo.Create(context.Background(), models.Paciente{
+				Nombre:          "Tipo Test",
+				Edad:            30,
+				Peso:            70.0,
+				Altura:          1.75,
+				PorcentajeGrasa: 20.0,
+				Notas:           "Nota previa",
+			})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPatch, "/pacientes/"+creado.ID, strings.NewReader(tc.payload))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+
+			assert.NotPanics(t, func() {
+				e.ServeHTTP(rec, req)
+			})
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), tc.expectedError)
+		})
+	}
+}

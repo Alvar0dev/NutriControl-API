@@ -293,12 +293,70 @@ func validarPaciente(p models.Paciente) error {
 	return nil
 }
 
+// manejarBindError propaga errores de tamaño de payload (413) y devuelve 400 para JSON malformado.
+func manejarBindError(c echo.Context, err error) error {
+	if errors.Is(err, echo.ErrStatusRequestEntityTooLarge) {
+		return err
+	}
+	return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+}
+
+// bindJSONStrict lee el cuerpo completo antes de decodificar JSON para garantizar que errores
+// de límite de tamaño (413) nunca sean descartados por decodificadores streaming.
+func bindJSONStrict(c echo.Context, dst any) error {
+	body, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		return err
+	}
+	if c.Request().ContentLength == 0 && len(bytes.TrimSpace(body)) == 0 {
+		return nil
+	}
+	return json.Unmarshal(body, dst)
+}
+
+// leerBodyPatchJSON lee y decodifica un objeto JSON no nulo para actualizaciones parciales (PATCH).
+func leerBodyPatchJSON(c echo.Context) (map[string]any, error) {
+	body, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		return nil, err
+	}
+	var cambios map[string]any
+	if err := json.Unmarshal(body, &cambios); err != nil || cambios == nil {
+		return nil, fmt.Errorf("invalid request")
+	}
+	return cambios, nil
+}
+
+func extraerStringJSON(cambios map[string]any, campo string) (string, bool, error) {
+	raw, ok := cambios[campo]
+	if !ok {
+		return "", false, nil
+	}
+	val, okStr := raw.(string)
+	if !okStr {
+		return "", true, fmt.Errorf("El campo '%s' debe ser una cadena de texto", campo)
+	}
+	return val, true, nil
+}
+
+func extraerFloatJSON(cambios map[string]any, campo string) (float64, bool, error) {
+	raw, ok := cambios[campo]
+	if !ok {
+		return 0, false, nil
+	}
+	val, okNum := raw.(float64)
+	if !okNum || math.IsNaN(val) || math.IsInf(val, 0) {
+		return 0, true, fmt.Errorf("El campo '%s' debe ser un número", campo)
+	}
+	return val, true, nil
+}
+
 // CreatePaciente crea un nuevo paciente mediante el repositorio.
 // El nombre se normaliza (trim y capitalización) antes de validar y guardar.
 func CreatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	paciente := new(models.Paciente)
-	if err := c.Bind(paciente); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	if err := bindJSONStrict(c, paciente); err != nil {
+		return manejarBindError(c, err)
 	}
 	paciente.Nombre = normalizarNombre(paciente.Nombre)
 	paciente.DeletedAt = nil
@@ -317,8 +375,8 @@ func CreatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 // sin persistir ningún paciente. Si todos son válidos, se crean y devuelven con 201 Created.
 func CreatePacientesBatch(c echo.Context, repo firestore.PacienteRepository) error {
 	var pacientes []models.Paciente
-	if err := c.Bind(&pacientes); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	if err := bindJSONStrict(c, &pacientes); err != nil {
+		return manejarBindError(c, err)
 	}
 	if len(pacientes) == 0 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El lote de pacientes no puede estar vacío"})
@@ -356,8 +414,8 @@ func UpdatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
 	}
 	p := new(models.Paciente)
-	if err := c.Bind(p); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	if err := bindJSONStrict(c, p); err != nil {
+		return manejarBindError(c, err)
 	}
 	p.Nombre = normalizarNombre(p.Nombre)
 	p.DeletedAt = nil
@@ -374,7 +432,7 @@ func UpdatePaciente(c echo.Context, repo firestore.PacienteRepository) error {
 
 // PatchPaciente aplica una actualización parcial sobre un paciente existente.
 // Solo se modifican los campos enviados en el body; los demás se conservan.
-// Body acepta cualquier subconjunto de: nombre, edad, peso, porcentaje_grasa, notas.
+// Body acepta cualquier subconjunto de: nombre, edad, peso, altura, porcentaje_grasa, notas.
 func PatchPaciente(c echo.Context, repo firestore.PacienteRepository) error {
 	id := c.Param("id")
 	if id == "" {
@@ -387,59 +445,59 @@ func PatchPaciente(c echo.Context, repo firestore.PacienteRepository) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
 	}
 
-	// Leer y parsear el body como mapa para aplicar solo los campos enviados
-	body, err := io.ReadAll(c.Request().Body)
+	cambios, err := leerBodyPatchJSON(c)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
-	}
-	var cambios map[string]any
-	if err := json.Unmarshal(body, &cambios); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return manejarBindError(c, err)
 	}
 
-	// Aplicar solo los campos que vinieron en el body
-	if nombre, ok := cambios["nombre"]; ok {
-		if n, ok := nombre.(string); ok {
-			existente.Nombre = normalizarNombre(n)
-			if existente.Nombre == "" {
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'nombre' es requerido"})
-			}
+	// Aplicar solo los campos que vinieron en el body con validación estricta de tipos y rangos
+	if n, ok, err := extraerStringJSON(cambios, "nombre"); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	} else if ok {
+		existente.Nombre = normalizarNombre(n)
+		if existente.Nombre == "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'nombre' es requerido"})
 		}
 	}
-	if edad, ok := cambios["edad"]; ok {
-		if e, ok := edad.(float64); ok {
-			if int(e) < edadMinima || int(e) > edadMaxima {
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'edad' debe estar entre %d y %d", edadMinima, edadMaxima)})
-			}
-			existente.Edad = int(e)
+	if e, ok, err := extraerFloatJSON(cambios, "edad"); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	} else if ok {
+		if e != math.Trunc(e) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'edad' debe ser un número entero"})
 		}
-	}
-	if peso, ok := cambios["peso"]; ok {
-		if p, ok := peso.(float64); ok {
-			if p <= 0 || p > pesoMaximo {
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'peso' debe ser mayor que 0 y menor o igual a %d", pesoMaximo)})
-			}
-			existente.Peso = p
+		if e < float64(edadMinima) || e > float64(edadMaxima) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'edad' debe estar entre %d y %d", edadMinima, edadMaxima)})
 		}
+		existente.Edad = int(e)
 	}
-	if grasa, ok := cambios["porcentaje_grasa"]; ok {
-		if g, ok := grasa.(float64); ok {
-			if g < 0 || g > porcentajeGrasaMaximo {
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'porcentaje_grasa' debe estar entre 0 y %d", porcentajeGrasaMaximo)})
-			}
-			existente.PorcentajeGrasa = g
+	if p, ok, err := extraerFloatJSON(cambios, "peso"); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	} else if ok {
+		if p <= 0 || p > pesoMaximo {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'peso' debe ser mayor que 0 y menor o igual a %d", pesoMaximo)})
 		}
+		existente.Peso = p
 	}
-	if altura, ok := cambios["altura"]; ok {
-		if a, ok := altura.(float64); ok {
-			if a < alturaMinima || a > alturaMaxima {
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'altura' debe estar entre %.2f y %.2f metros", alturaMinima, alturaMaxima)})
-			}
-			existente.Altura = a
+	if g, ok, err := extraerFloatJSON(cambios, "porcentaje_grasa"); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	} else if ok {
+		if g < 0 || g > porcentajeGrasaMaximo {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'porcentaje_grasa' debe estar entre 0 y %d", porcentajeGrasaMaximo)})
 		}
+		existente.PorcentajeGrasa = g
 	}
-	if notas, ok := cambios["notas"]; ok {
-		existente.Notas = notas.(string)
+	if a, ok, err := extraerFloatJSON(cambios, "altura"); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	} else if ok {
+		if a < alturaMinima || a > alturaMaxima {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("El campo 'altura' debe estar entre %.2f y %.2f metros", alturaMinima, alturaMaxima)})
+		}
+		existente.Altura = a
+	}
+	if notas, ok, err := extraerStringJSON(cambios, "notas"); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	} else if ok {
+		existente.Notas = notas
 	}
 
 	existente.ID = id
@@ -616,8 +674,8 @@ func CreateControlPaciente(c echo.Context, repo firestore.PacienteRepository) er
 	}
 
 	control := new(models.ControlClinico)
-	if err := c.Bind(control); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	if err := bindJSONStrict(c, control); err != nil {
+		return manejarBindError(c, err)
 	}
 
 	if err := validarControlClinico(*control); err != nil {
@@ -654,8 +712,8 @@ func UpdateControlPaciente(c echo.Context, repo firestore.PacienteRepository) er
 	}
 
 	control := new(models.ControlClinico)
-	if err := c.Bind(control); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	if err := bindJSONStrict(c, control); err != nil {
+		return manejarBindError(c, err)
 	}
 
 	if err := validarControlClinico(*control); err != nil {
@@ -767,18 +825,15 @@ func PatchControlPaciente(c echo.Context, repo firestore.PacienteRepository) err
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener control clínico"})
 	}
 
-	body, err := io.ReadAll(c.Request().Body)
+	cambios, err := leerBodyPatchJSON(c)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
-	}
-	var cambios map[string]any
-	if err := json.Unmarshal(body, &cambios); err != nil || cambios == nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return manejarBindError(c, err)
 	}
 
-	if rawFecha, ok := cambios["fecha"]; ok {
-		fechaStr, okStr := rawFecha.(string)
-		if !okStr || strings.TrimSpace(fechaStr) == "" {
+	if fechaStr, ok, err := extraerStringJSON(cambios, "fecha"); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'fecha' debe tener formato YYYY-MM-DD o RFC3339"})
+	} else if ok {
+		if strings.TrimSpace(fechaStr) == "" {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'fecha' debe tener formato YYYY-MM-DD o RFC3339"})
 		}
 		parsedFecha, parseErr := parseFechaQuery(fechaStr, false)
@@ -787,11 +842,9 @@ func PatchControlPaciente(c echo.Context, repo firestore.PacienteRepository) err
 		}
 		existente.Fecha = *parsedFecha
 	}
-	if rawPeso, ok := cambios["peso"]; ok {
-		peso, okNum := rawPeso.(float64)
-		if !okNum {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'peso' debe ser un número"})
-		}
+	if peso, ok, err := extraerFloatJSON(cambios, "peso"); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	} else if ok {
 		if peso <= 0 || peso > pesoMaximo {
 			return c.JSON(http.StatusBadRequest, map[string]string{
 				"error": fmt.Sprintf("El campo 'peso' debe ser mayor que 0 y menor o igual a %d", pesoMaximo),
@@ -799,11 +852,9 @@ func PatchControlPaciente(c echo.Context, repo firestore.PacienteRepository) err
 		}
 		existente.Peso = peso
 	}
-	if rawGrasa, ok := cambios["porcentaje_grasa"]; ok {
-		grasa, okNum := rawGrasa.(float64)
-		if !okNum {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'porcentaje_grasa' debe ser un número"})
-		}
+	if grasa, ok, err := extraerFloatJSON(cambios, "porcentaje_grasa"); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	} else if ok {
 		if grasa < 0 || grasa > porcentajeGrasaMaximo {
 			return c.JSON(http.StatusBadRequest, map[string]string{
 				"error": fmt.Sprintf("El campo 'porcentaje_grasa' debe estar entre 0 y %d", porcentajeGrasaMaximo),
@@ -811,11 +862,9 @@ func PatchControlPaciente(c echo.Context, repo firestore.PacienteRepository) err
 		}
 		existente.PorcentajeGrasa = grasa
 	}
-	if rawNotas, ok := cambios["notas"]; ok {
-		notas, okStr := rawNotas.(string)
-		if !okStr {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'notas' debe ser una cadena de texto"})
-		}
+	if notas, ok, err := extraerStringJSON(cambios, "notas"); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	} else if ok {
 		existente.Notas = notas
 	}
 
