@@ -1,0 +1,13 @@
+.git/
+.github/
+.gitignore
+.atl/
+odd/
+docs/
+specs/
+todo
+*.md
+*.exe
+*.dll
+Dockerfile
+.dockerignore
