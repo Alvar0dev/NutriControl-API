@@ -21,6 +21,8 @@ nutricontrol/
 │       └── ci.yml                 # CI en GitHub Actions (vet, test -race, build).
 ├── main.go                        # Entry point. Echo + middlewares + timeouts + graceful shutdown.
 ├── main_test.go                   # Tests de arranque, middlewares, timeouts y graceful shutdown.
+├── Dockerfile                     # Build multi-stage (golang:1.26-alpine → distroless:nonroot).
+├── .dockerignore                  # Excluye .git, docs, odd, binarios y archivos no-runtime del build.
 ├── go.mod / go.sum                # Módulo `nutricontrol`.
 ├── PROJECT_INDEX.md               # ESTE archivo: navegación, comandos, estado.
 ├── AGENTS.md                      # Contexto operativo breve (arranque rápido).
@@ -81,7 +83,7 @@ Lee env vars: `PORT` (default `:8080`), `BODY_LIMIT` (default `"1M"`), `CORS_ALL
 | GET | `/pacientes/inactivos` | GetPacientesInactivos | GetInactivos | 200 OK `[Paciente]` |
 | POST | `/pacientes/{id}/restore` | RestorePaciente | Restore | 200 OK `Paciente` / 404 |
 | GET | `/pacientes/{id}/controles` | GetControlesPaciente | GetByID + GetControles + filtro `?desde=&hasta=` y paginación `?limit=&offset=` | 200 OK `[ControlClinico]` / 400 / 404 |
-| GET | `/pacientes/{id}/controles/resumen` | GetResumenControlesPaciente | GetByID + GetControles | 200 OK `ResumenControles` / 404 |
+| GET | `/pacientes/{id}/controles/resumen` | GetResumenControlesPaciente | GetByID + GetControles + filtro `?desde=&hasta=` | 200 OK `ResumenControles` / 400 / 404 |
 | GET | `/pacientes/{id}/controles/export` | ExportControlesPacienteCSV | GetByID + GetControles + filtro `?desde=&hasta=` | 200 OK `text/csv` (`attachment; filename="controles.csv"`) / 400 / 404 |
 | GET | `/pacientes/{id}/controles/ultimo` | GetUltimoControlPaciente | GetByID + GetControles | 200 OK `ControlClinico` / 404 |
 | GET | `/pacientes/{id}/controles/{controlId}` | GetControlPacienteByID | GetByID + GetControlByID | 200 OK `ControlClinico` / 404 |
@@ -167,6 +169,8 @@ go mod tidy            # Limpia go.mod/go.sum
 ```bash
 go build -o nutricontrol.exe ./main.go   # Windows
 go run ./...                              # Ejecuta main.go (puerto :8080)
+docker build -t nutricontrol-api .        # Imagen multi-stage distroless:nonroot (~22 MB)
+docker run -p 8080:8080 -e NUTRICONTROL_USE_MOCK=true nutricontrol-api
 ```
 
 ### 5.3 Testing
@@ -196,9 +200,9 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `BODY_LIMIT`, `CORS_ALLOWED_ORIGINS`, `strictJSONSerializer`, `RequestID`/`Logger`/`Recover`/`CORS`/`BodyLimit`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`, `PatchPaciente` con validación estricta de tipos) y controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/ultimo`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
-| Tests | `go test -cover -count=1 ./...` verde (122 tests top-level: `nutricontrol` 59.1%, `handlers` 88.1%, `models` [no statements], `pkg/firestore` 85.0%). |
-| Build / CI | `go build ./...` y `go vet ./...` OK. Workflow CI `.github/workflows/ci.yml` en `actions/checkout@v7` + `actions/setup-go@v7` (Node.js 24) con `go test -race -cover -count=1 ./...`. |
+| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `BODY_LIMIT`, `CORS_ALLOWED_ORIGINS`, `strictJSONSerializer`, `RequestID`/`Logger`/`Recover`/`CORS`/`BodyLimit`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`, `PatchPaciente` con validación estricta de tipos) y controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/ultimo`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen` con `?desde=&hasta=`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
+| Tests | `go test -cover -count=1 ./...` verde (124 tests top-level: `nutricontrol` 59.1%, `handlers` 88.3%, `models` [no statements], `pkg/firestore` 85.0%). |
+| Build / CI | `go build ./...`, `go vet ./...` y contenedor Docker multi-stage (`golang:1.26-alpine` → `gcr.io/distroless/static-debian12:nonroot`, ~22 MB) verificados. Workflow CI `.github/workflows/ci.yml` en `actions/checkout@v7` + `actions/setup-go@v7` (Node.js 24) con `go test -race -cover -count=1 ./...` en verde (run `45597881616` sin avisos Node 20). |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente. `feature-c4-search.md` y `feature-b-paginacion-firestore.md` archivados en `odd/tasks/archive/`. |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
@@ -400,7 +404,19 @@ go vet ./...                     # Verificación estándar
   - Test: `TestPatchPacienteTiposInvalidos` (`122` tests top-level en verde; cobertura `59.1%` / `88.1%` / `85.0%`).
   - Commits: `32e92d3 fix: endurecer tipos JSON en PatchPaciente y lectura estricta bindJSONStrict` y `86e94d9 feat: agregar BodyLimit, CORS configurable y strictJSONSerializer en main.go`.
 
-### 6.23 Dificultades acumuladas y decisiones de diseño
+### 6.23 Feature: Filtro temporal en resumen de controles, verificación CI v7 y `Dockerfile` multi-stage (v1.0.21)
+
+- **Filtrado `?desde=&hasta=` en `GET /pacientes/:id/controles/resumen` (`handlers/paciente.go`, `handlers/paciente_test.go`)**:
+  - `GetResumenControlesPaciente` reutiliza `obtenerControlesFiltrados(c, repo)` para filtrar por fecha (`YYYY-MM-DD` inclusivo hasta fin de día UTC o `RFC3339`) manteniendo compatibilidad sin parámetros y devolviendo `200 OK` con `total_controles: 0` cuando el rango no tiene coincidencias, `400` ante formato inválido/rango invertido y `404` si el paciente no existe o fue eliminado.
+  - Tests: `TestGetResumenControlesPacienteFiltroFechas` (5 subcasos) y `TestGetResumenControlesPacienteFiltroFechasInvalidas` (3 subcasos).
+  - Commit: `92f26e3 feat: soportar filtro temporal desde/hasta en resumen de controles`.
+- **Verificación CI v7 y contenerización (`Dockerfile`, `.dockerignore`)**:
+  - Confirmada vía `gh run view 45597881616` la corrida en verde de `.github/workflows/ci.yml` (`bd622f1`, `1m24s` en Go `1.26.1` con `actions/checkout@v7`, `actions/setup-go@v7`, `-race`, `-cover` y cero avisos Node.js 20).
+  - Agregados `Dockerfile` multi-stage (`golang:1.26-alpine`, `CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w"` → `gcr.io/distroless/static-debian12:nonroot`, `USER nonroot:nonroot`, `PORT=8080`, `ENTRYPOINT ["/nutricontrol"]`) y `.dockerignore`.
+  - Validados suite Go (`124` tests top-level: `nutricontrol` `59.1%`, `handlers` `88.3%`, `models` `[no statements]`, `pkg/firestore` `85.0%`), build/smoke test Docker real (`22.049.372 bytes`, `/health`, `/`, `POST /pacientes` y cierre por `SIGTERM`) y auditoría independiente read-only `PASS`.
+  - Commit: `714f97a build: agregar Dockerfile multi-stage y .dockerignore`.
+
+### 6.24 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -438,6 +454,9 @@ go vet ./...                     # Verificación estándar
 34. **Propagación de `413` en streaming (`strictJSONSerializer` y `bindJSONStrict`) entre Go `1.26` y `1.27`**: en `encoding/json` v1 (Go `<= 1.26`, versión en `go.mod` y CI), `json.Decoder` escanea el buffer antes de revisar errores de lectura, pudiendo descartar `echo.ErrStatusRequestEntityTooLarge` si el JSON cierra en el mismo `Read` (enmascarado localmente bajo Go `1.27.2` con `json/v2`). Reemplazar la decodificación streaming por `io.ReadAll` + `json.Unmarshal` y probar `partialLimitReader` garantiza `413` en ambas versiones.
 35. **Validación preventiva de `BODY_LIMIT` y CORS seguro por defecto**: validar `BODY_LIMIT` con `bytes.Parse` evita el `panic` de `middleware.BodyLimit` ante valores inválidos o `<= 0`, mientras que omitir `CORSWithConfig` cuando `CORS_ALLOWED_ORIGINS` está vacío evita el wildcard `*` predeterminado de Echo.
 36. **Endurecimiento uniforme de `PatchPaciente` con `extraerStringJSON` y `extraerFloatJSON`**: reemplaza el type assertion inseguro `notas.(string)`, rechaza `null`, decimales en `edad` y tipos erróneos que antes devolvían `200 OK` sin aplicar cambios.
+37. **Reutilización directa de `obtenerControlesFiltrados` en `GetResumenControlesPaciente`**: elimina la duplicación de validaciones (`id`, `repo.GetByID`, `repo.GetControles`) unificando el soporte de `?desde=&hasta=`, la precedencia `404` antes que `400` y el ajuste inclusivo hasta fin de día UTC sin introducir paginación en el resumen.
+38. **Semántica `200 OK` con `total_controles: 0` ante rangos vacíos en `/controles/resumen`**: a diferencia de `/controles/ultimo` (recurso puntual que responde `404`), `/resumen` mantiene `200 OK` omitiendo `fecha_inicio`/`fecha_fin` (`omitempty`), coherente con el estado inicial de un paciente sin controles.
+39. **`gcr.io/distroless/static-debian12:nonroot`, `ENTRYPOINT` exec y `.dockerignore`**: frente a `scratch`, `distroless:nonroot` incluye los certificados CA requeridos por Cloud Firestore gRPC/TLS y ejecución sin privilegios `root` (~22 MB); el formato exec entrega `SIGTERM` directo a `signal.NotifyContext` en `main.go`, y `.dockerignore` evita enviar `.git/`, docs o binarios invalidando la caché de `go mod download`.
 
 ## 7. Convenciones de entrega
 

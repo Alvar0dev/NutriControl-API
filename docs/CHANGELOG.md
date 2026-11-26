@@ -1,5 +1,28 @@
 # CHANGELOG.md
 
+## Versión 1.0.21 - 2026-11-26
+
+### Filtrado temporal en resumen de controles (`?desde=&hasta=`), verificación CI v7 y `Dockerfile` multi-stage
+
+- **Filtrado temporal opcional en `GET /pacientes/:id/controles/resumen` (`handlers/paciente.go`, `handlers/paciente_test.go`)**:
+  - `GetResumenControlesPaciente` reutiliza `obtenerControlesFiltrados(c, repo)` para aceptar `?desde=&hasta=` (`YYYY-MM-DD` inclusivo hasta `23:59:59.999999999 UTC` o `RFC3339`), manteniendo retrocompatibilidad total cuando no se envían query params.
+  - Rango sin coincidencias devuelve `200 OK` con `total_controles: 0` (omitiendo `fecha_inicio` y `fecha_fin` vía `omitempty`), rango de un control deja deltas en `0`, paciente inexistente o soft-deleted responde `404` y fechas inválidas o rango invertido (`desde > hasta`) responden `400`.
+  - Tests nuevos: `TestGetResumenControlesPacienteFiltroFechas` (5 subcasos) y `TestGetResumenControlesPacienteFiltroFechasInvalidas` (3 subcasos).
+- **Verificación de CI v7 y contenerización minimalista (`Dockerfile`, `.dockerignore`)**:
+  - Confirmada vía `gh run view 45597881616` la corrida verde de `.github/workflows/ci.yml` sobre `v1.0.20` (`bd622f1`, `1m24s` en `ubuntu-latest`, Go `1.26.1`, `actions/checkout@v7` y `actions/setup-go@v7`, `go test -race -cover`, sin anotaciones de deprecación de Node.js 20).
+  - Creado `Dockerfile` multi-stage: compilación estática Linux (`golang:1.26-alpine`, `CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w"`) sobre runtime `gcr.io/distroless/static-debian12:nonroot` (`USER nonroot:nonroot`, `ENV PORT=8080`, `EXPOSE 8080`, `ENTRYPOINT ["/nutricontrol"]`).
+  - Creado `.dockerignore` excluyendo `.git/`, `.github/`, `.gitignore`, `.atl/`, `odd/`, `docs/`, `specs/`, `todo`, `*.md`, `*.exe`, `*.dll`, `Dockerfile` y `.dockerignore`.
+  - Validados suite Go (`124` tests top-level en verde: `nutricontrol` `59.1%`, `handlers` `88.3%`, `models` `[no statements]`, `pkg/firestore` `85.0%`; `go vet ./...` y `go build ./...` OK), `docker build` + smoke test de contenedor (`22.049.372 bytes`, `User: nonroot:nonroot`, `GET /health` `200`, `GET /` `200`, `POST /pacientes` `201` y cierre limpio por `SIGTERM` con `"Servidor detenido correctamente"`) y verificación independiente read-only `PASS`.
+- Commits: `92f26e3` (`feat: soportar filtro temporal desde/hasta en resumen de controles`) y `714f97a` (`build: agregar Dockerfile multi-stage y .dockerignore`).
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Reutilización directa de `obtenerControlesFiltrados` frente a duplicación en `GetResumenControlesPaciente`.** Antes `GetResumenControlesPaciente` repetía la validación de `:id`, `repo.GetByID` y `repo.GetControles`. Sustituir ese bloque por `obtenerControlesFiltrados` (ya compartido por `GetControlesPaciente` y `ExportControlesPacienteCSV`) unifica la precedencia `404` antes que `400`, el ajuste de `hasta` (`YYYY-MM-DD`) a fin de día UTC y el rechazo de rangos invertidos, sin aplicar paginación al resumen agregado.
+2. **Semántica `200 OK` con `total_controles: 0` cuando un rango no devuelve controles.** A diferencia de `GET /pacientes/:id/controles/ultimo` (un recurso puntual que devuelve `404`), `/resumen` representa un agregado evolutivo; responder `200 OK` con `total_controles: 0` y sin `fecha_inicio`/`fecha_fin` mantiene coherencia con el caso base sin controles y evita que un filtro temporal vacío rompa consumidores gráficos.
+3. **Elección de `gcr.io/distroless/static-debian12:nonroot` y `ENTRYPOINT` en forma exec.** Un binario Go `CGO_ENABLED=0` podría correr sobre `scratch`, pero el adaptador de Cloud Firestore requiere certificados CA (`/etc/ssl/certs`) para TLS/gRPC y datos de zona horaria además de ejecución sin privilegios `root`. `distroless/static-debian12:nonroot` aporta esa base en ~22 MB sin shell ni utilidades innecesarias, y `ENTRYPOINT ["/nutricontrol"]` en forma exec garantiza que `docker stop` entregue `SIGTERM` directamente al proceso PID 1 (`signal.NotifyContext` en `main.go`).
+4. **Aislamiento de contexto Docker y separación del commit `build:` (`Risk: item 5`).** Excluir `.git/`, documentación y binarios Windows en `.dockerignore` evita invalidar la caché de `go mod download` al editar docs y mantiene fuera del contexto de build archivos ajenos al runtime; commitear `Dockerfile`/`.dockerignore` aparte del cambio funcional facilita auditoría y rollback independiente de infraestructura.
+
+---
 ## Versión 1.0.20 - 2026-11-25
 
 ### Hardening de entrada HTTP (`BodyLimit` y `CORS`), endurecimiento de tipos en `PatchPaciente` y propagación estricta de `413`

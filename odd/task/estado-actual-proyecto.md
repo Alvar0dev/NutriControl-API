@@ -57,6 +57,8 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T36 | S1 | inline | done | `32e92d3` fix: endurecer tipos JSON en PatchPaciente y lectura estricta bindJSONStrict |
 | T37 | S1 | inline | done | `86e94d9` feat: agregar BodyLimit, CORS configurable y strictJSONSerializer en main.go |
 | T38 | S1 | inline | done | `docs/arquitectura-y-defensa.md`: guía técnica de arquitectura y defensa Q&A |
+| T39 | S1 | inline | done | `92f26e3` feat: soportar filtro temporal desde/hasta en resumen de controles |
+| T40 | S1 | inline | done | `714f97a` build: agregar Dockerfile multi-stage y .dockerignore |
 
 ## Log
 
@@ -236,6 +238,16 @@ L37: [asistente] Implementada test-first la Opción 1 completa (`32e92d3` y `86e
 L38: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
 L38: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.20 + `docs/arquitectura-y-defensa.md` en `docs/CHANGELOG.md`, `PROJECT_INDEX.md`, `AGENTS.md`, `docs/organizacion-documentacion.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: filtrado temporal opcional `?desde=&hasta=` en `GET /pacientes/:id/controles/resumen` reutilizando `obtenerControlesFiltrados`; Opción 2: verificar corrida CI v7 con Go 1.26 en GitHub y añadir `Dockerfile` multi-stage minimalista para despliegue; Opción 3: paginación nativa/cursores en Firestore o rate limiting por IP en `main.go`).
+
+L39: [usuario] "Planifica bien como hacer los todo y como reflejarlos en la documentacion" → "haz opcion 1 y 2 si"
+L39: [asistente] Planificadas las 3 opciones y ejecutadas test-first las Opciones 1 y 2 (v1.0.21):
+- Opción 1 (`92f26e3`, `Risk: none`): `GetResumenControlesPaciente` (`handlers/paciente.go`) reutiliza `obtenerControlesFiltrados` para soportar `?desde=&hasta=` (`YYYY-MM-DD` inclusivo hasta `23:59:59.999999999 UTC` o `RFC3339`), respondiendo `200 OK` (`total_controles: 0` si el rango está vacío), `400` si formato inválido o `desde > hasta` y `404` si paciente ausente/eliminado; agregados `TestGetResumenControlesPacienteFiltroFechas` y `TestGetResumenControlesPacienteFiltroFechasInvalidas` tras observar `RED` inicial.
+- Opción 2 (`714f97a`, `Risk: item 5`): verificada corrida CI v7 `45597881616` en verde (`1m24s` sobre `bd622f1`, cero avisos de Node.js 20); creados `Dockerfile` multi-stage (`golang:1.26-alpine` → `gcr.io/distroless/static-debian12:nonroot`, `CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w"`, `PORT=8080`, `USER nonroot:nonroot`, `ENTRYPOINT ["/nutricontrol"]`) y `.dockerignore`.
+- Verificación completa: `go vet ./...`, `go build ./...`, `go test -cover -count=1 ./...` (`124` tests top-level: `nutricontrol` `59.1%`, `handlers` `88.3%`, `models` `[no statements]`, `pkg/firestore` `85.0%`; `-race` no disponible localmente en Windows sin `gcc`), build Docker real + smoke test (`22.049.372 bytes`, `User: nonroot:nonroot`, `/health`, `/`, `POST /pacientes` y apagado por `SIGTERM` con `"Servidor detenido correctamente"`), más auditoría independiente read-only `PASS` (incluyendo compilación cruzada estática Linux).
+
+L40: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L40: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.21 (reutilización de `obtenerControlesFiltrados`, semántica `200 OK` en rango vacío para `/resumen`, `distroless:nonroot` por certificados CA de Cloud Firestore TLS/gRPC y `ENTRYPOINT` exec para `SIGTERM`, exclusión de contexto `.dockerignore` y separación del commit `build:`) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (2, 3.2, 5.2, 6, 6.23 y 6.24), `AGENTS.md`, `docs/arquitectura-y-defensa.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: rate limiting opcional por IP en `main.go` configurable por env var; Opción 2: paginación nativa con cursores `StartAfter` en `PacienteFirestoreRepo`; Opción 3: autenticación HTTP mediante middleware JWT/API key configurable).
 
 
 
