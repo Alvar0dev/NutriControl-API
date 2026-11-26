@@ -992,25 +992,15 @@ func redondear2(val float64) float64 {
 }
 
 // GetResumenControlesPaciente calcula el resumen evolutivo de peso, porcentaje de grasa e IMC
-// entre el primer y último control clínico de un paciente activo.
+// entre el primer y último control clínico de un paciente activo, con filtrado temporal opcional (?desde=&hasta=).
 func GetResumenControlesPaciente(c echo.Context, repo firestore.PacienteRepository) error {
-	id := c.Param("id")
-	if id == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "El campo 'id' es requerido"})
-	}
-
-	ctx := c.Request().Context()
-	if _, err := repo.GetByID(ctx, id); err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "No se encontró paciente con ID " + id})
-	}
-
-	controles, err := repo.GetControles(ctx, id)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error al obtener controles clínicos"})
+	controles, status, errMsg := obtenerControlesFiltrados(c, repo)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": errMsg})
 	}
 
 	resumen := ResumenControles{
-		PacienteID:     id,
+		PacienteID:     c.Param("id"),
 		TotalControles: len(controles),
 	}
 	if len(controles) == 0 {

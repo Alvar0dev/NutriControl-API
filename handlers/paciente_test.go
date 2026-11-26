@@ -2295,6 +2295,198 @@ func TestGetResumenControlesPacienteNoEncontradoYSoftDeleted(t *testing.T) {
 	}
 }
 
+// TestGetResumenControlesPacienteFiltroFechas verifica el filtrado temporal opcional (?desde=&hasta=) en el resumen evolutivo.
+func TestGetResumenControlesPacienteFiltroFechas(t *testing.T) {
+	e := echo.New()
+	repo := firestore.NewMockPacienteRepository()
+	SetupRoutes(e, repo)
+
+	creado, err := repo.Create(context.Background(), models.Paciente{
+		Nombre: "Resumen Rango",
+		Edad:   32,
+		Peso:   85.0,
+		Altura: 1.80,
+	})
+	require.NoError(t, err)
+
+	payloads := []string{
+		`{"fecha":"2026-09-10T09:00:00Z","peso":85.0,"porcentaje_grasa":22.0}`,
+		`{"fecha":"2026-10-15T14:30:00Z","peso":82.0,"porcentaje_grasa":20.5}`,
+		`{"fecha":"2026-11-01T10:00:00Z","peso":80.0,"porcentaje_grasa":19.2}`,
+		`{"fecha":"2026-11-20T18:00:00Z","peso":78.5,"porcentaje_grasa":18.0}`,
+	}
+	for _, p := range payloads {
+		req := httptest.NewRequest(http.MethodPost, "/pacientes/"+creado.ID+"/controles", strings.NewReader(p))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusCreated, rec.Code)
+	}
+
+	casos := []struct {
+		name               string
+		query              string
+		expectedTotal      int
+		expectedInicio     string
+		expectedFin        string
+		pesoInicial        float64
+		pesoActual         float64
+		deltaPeso          float64
+		grasaInicial       float64
+		grasaActual        float64
+		deltaGrasa         float64
+		imcInicial         float64
+		imcActual          float64
+		deltaIMC           float64
+	}{
+		{
+			name:           "rango YYYY-MM-DD inclusivo hasta fin de dia",
+			query:          "?desde=2026-10-15&hasta=2026-11-01",
+			expectedTotal:  2,
+			expectedInicio: "2026-10-15T14:30:00Z",
+			expectedFin:    "2026-11-01T10:00:00Z",
+			pesoInicial:    82.0,
+			pesoActual:     80.0,
+			deltaPeso:      -2.0,
+			grasaInicial:   20.5,
+			grasaActual:    19.2,
+			deltaGrasa:     -1.3,
+			imcInicial:     25.31,
+			imcActual:      24.69,
+			deltaIMC:       -0.62,
+		},
+		{
+			name:           "desde RFC3339 exacto excluye mismo dia previo",
+			query:          "?desde=2026-10-15T15:00:00Z",
+			expectedTotal:  2,
+			expectedInicio: "2026-11-01T10:00:00Z",
+			expectedFin:    "2026-11-20T18:00:00Z",
+			pesoInicial:    80.0,
+			pesoActual:     78.5,
+			deltaPeso:      -1.5,
+			grasaInicial:   19.2,
+			grasaActual:    18.0,
+			deltaGrasa:     -1.2,
+			imcInicial:     24.69,
+			imcActual:      24.23,
+			deltaIMC:       -0.46,
+		},
+		{
+			name:           "solo hasta YYYY-MM-DD",
+			query:          "?hasta=2026-10-15",
+			expectedTotal:  2,
+			expectedInicio: "2026-09-10T09:00:00Z",
+			expectedFin:    "2026-10-15T14:30:00Z",
+			pesoInicial:    85.0,
+			pesoActual:     82.0,
+			deltaPeso:      -3.0,
+			grasaInicial:   22.0,
+			grasaActual:    20.5,
+			deltaGrasa:     -1.5,
+			imcInicial:     26.23,
+			imcActual:      25.31,
+			deltaIMC:       -0.92,
+		},
+		{
+			name:           "rango con un solo control",
+			query:          "?desde=2026-11-01&hasta=2026-11-01",
+			expectedTotal:  1,
+			expectedInicio: "2026-11-01T10:00:00Z",
+			expectedFin:    "2026-11-01T10:00:00Z",
+			pesoInicial:    80.0,
+			pesoActual:     80.0,
+			deltaPeso:      0.0,
+			grasaInicial:   19.2,
+			grasaActual:    19.2,
+			deltaGrasa:     0.0,
+			imcInicial:     24.69,
+			imcActual:      24.69,
+			deltaIMC:       0.0,
+		},
+		{
+			name:          "rango sin coincidencias devuelve resumen vacio",
+			query:         "?desde=2026-12-01",
+			expectedTotal: 0,
+		},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles/resumen"+tc.query, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+
+			var resumen ResumenControles
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resumen))
+			assert.Equal(t, creado.ID, resumen.PacienteID)
+			assert.Equal(t, tc.expectedTotal, resumen.TotalControles)
+
+			if tc.expectedTotal == 0 {
+				assert.Nil(t, resumen.FechaInicio)
+				assert.Nil(t, resumen.FechaFin)
+				assert.NotContains(t, rec.Body.String(), "fecha_inicio")
+				assert.NotContains(t, rec.Body.String(), "fecha_fin")
+				assert.Equal(t, 0.0, resumen.DeltaPeso)
+				assert.Equal(t, 0.0, resumen.DeltaPorcentajeGrasa)
+				assert.Equal(t, 0.0, resumen.DeltaIMC)
+				return
+			}
+
+			expectedInicio, parseErr := time.Parse(time.RFC3339, tc.expectedInicio)
+			require.NoError(t, parseErr)
+			expectedFin, parseErr := time.Parse(time.RFC3339, tc.expectedFin)
+			require.NoError(t, parseErr)
+
+			require.NotNil(t, resumen.FechaInicio)
+			require.NotNil(t, resumen.FechaFin)
+			assert.True(t, resumen.FechaInicio.Equal(expectedInicio))
+			assert.True(t, resumen.FechaFin.Equal(expectedFin))
+			assert.Equal(t, tc.pesoInicial, resumen.PesoInicial)
+			assert.Equal(t, tc.pesoActual, resumen.PesoActual)
+			assert.Equal(t, tc.deltaPeso, resumen.DeltaPeso)
+			assert.Equal(t, tc.grasaInicial, resumen.PorcentajeGrasaInicial)
+			assert.Equal(t, tc.grasaActual, resumen.PorcentajeGrasaActual)
+			assert.Equal(t, tc.deltaGrasa, resumen.DeltaPorcentajeGrasa)
+			assert.Equal(t, tc.imcInicial, resumen.IMCInicial)
+			assert.Equal(t, tc.imcActual, resumen.IMCActual)
+			assert.Equal(t, tc.deltaIMC, resumen.DeltaIMC)
+		})
+	}
+}
+
+// TestGetResumenControlesPacienteFiltroFechasInvalidas verifica rechazo 400 ante fechas inválidas o rango invertido.
+func TestGetResumenControlesPacienteFiltroFechasInvalidas(t *testing.T) {
+	casos := []struct {
+		name          string
+		query         string
+		expectedError string
+	}{
+		{name: "desde invalido", query: "?desde=no-es-fecha", expectedError: "desde"},
+		{name: "hasta invalido", query: "?hasta=15/11/2026", expectedError: "hasta"},
+		{name: "desde posterior a hasta", query: "?desde=2026-11-20&hasta=2026-10-01", expectedError: "posterior"},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			repo := firestore.NewMockPacienteRepository()
+			SetupRoutes(e, repo)
+
+			creado, err := repo.Create(context.Background(), models.Paciente{Nombre: "Resumen Fechas Inv", Edad: 30, Peso: 70})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodGet, "/pacientes/"+creado.ID+"/controles/resumen"+tc.query, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), tc.expectedError)
+		})
+	}
+}
+
 // TestGetControlesPacienteFiltroFechas verifica el filtrado inclusivo por rango de fechas (YYYY-MM-DD y RFC3339).
 func TestGetControlesPacienteFiltroFechas(t *testing.T) {
 	e := echo.New()
