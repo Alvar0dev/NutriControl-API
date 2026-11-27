@@ -27,6 +27,7 @@ nutricontrol/
 ├── PROJECT_INDEX.md               # ESTE archivo: navegación, comandos, estado.
 ├── AGENTS.md                      # Contexto operativo breve (arranque rápido).
 ├── README.md                      # Bitácora histórica día a día (no editar por sesión).
+├── plan.md                        # Hoja de ruta operativa para próximas sesiones.
 ├── todo                           # Checklist ligero de la sesión actual.
 ├── handlers/                      # Capa presentation (HTTP).
 │   ├── paciente.go                # Handlers + SetupRoutes (inyecta repo).
@@ -61,11 +62,11 @@ nutricontrol/
 
 ### 3.1 Arranque — `main.go`
 
-Lee env vars: `PORT` (default `:8080`), `BODY_LIMIT` (default `"1M"`), `CORS_ALLOWED_ORIGINS` (opcional, separado por comas; desactivado por defecto), `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
+Lee env vars: `PORT` (default `:8080`), `BODY_LIMIT` (default `"1M"`), `CORS_ALLOWED_ORIGINS` (opcional, separado por comas; desactivado por defecto), `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` (opcionales; desactivado por defecto si `RATE_LIMIT_RPS` falta o es `<= 0`), `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 
 - Si mock → `firestore.NewMockPacienteRepository()`.
 - Si real → `firestore.NewPacienteFirestoreRepo(ctx, projectID)` (falla abiertamente si no hay credenciales GCP).
-- Construye Echo vía `loadServerConfig()` + `newEchoWithConfig(repo, cfg)` (`strictJSONSerializer{}`, middlewares `RequestID` → `Logger` → `Recover` → `CORSWithConfig` opcional → `BodyLimit`, `handlers.SetupRoutes(e, repo)` y `GET /`).
+- Construye Echo vía `loadServerConfig()` + `newEchoWithConfig(repo, cfg)` (`strictJSONSerializer{}`, middlewares `RequestID` → `Logger` → `Recover` → `CORSWithConfig` opcional → `RateLimiterWithConfig` opcional → `BodyLimit`, `handlers.SetupRoutes(e, repo)` y `GET /`).
 - Arranca `*http.Server` (`newServerWithConfig`) con timeouts explícitos (`ReadHeaderTimeout: 5s`, `ReadTimeout: 15s`, `WriteTimeout: 15s`, `IdleTimeout: 60s`) y apagado ordenado (`runServer` / `serve`) ante `SIGINT`/`SIGTERM` con timeout de `10s`.
 
 ### 3.2 Rutas (contrato API)
@@ -192,6 +193,8 @@ go vet ./...                     # Verificación estándar
 | `PORT` | No | `8080` o `:8080` | Puerto de escucha HTTP (default `:8080`). |
 | `BODY_LIMIT` | No | `1M`, `512K`, `2M` | Límite máximo de payload JSON/HTTP (`413`, default `1M`). |
 | `CORS_ALLOWED_ORIGINS` | No | `http://localhost:3000,...` | Orígenes CORS permitidos separados por coma (desactivado si vacío). |
+| `RATE_LIMIT_RPS` | No | `15`, `2.5` | Peticiones/segundo por IP (`RateLimiterMemoryStore`, TTL `3m`; desactivado si falta o `<= 0`). |
+| `RATE_LIMIT_BURST` | No | `30` | Ráfaga máxima por IP cuando `RATE_LIMIT_RPS > 0` (default `max(1, ceil(RATE_LIMIT_RPS))`). |
 | `NUTRICONTROL_USE_MOCK` | No | `true` | Forzar mock en memoria. |
 | `GCP_PROJECT_ID` | No | `<id>` | ID proyecto GCP para Firestore real. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | `/path/cred.json` | Credenciales de servicio GCP. |
@@ -200,9 +203,9 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `BODY_LIMIT`, `CORS_ALLOWED_ORIGINS`, `strictJSONSerializer`, `RequestID`/`Logger`/`Recover`/`CORS`/`BodyLimit`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`, `PatchPaciente` con validación estricta de tipos) y controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/ultimo`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen` con `?desde=&hasta=`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
-| Tests | `go test -cover -count=1 ./...` verde (124 tests top-level: `nutricontrol` 59.1%, `handlers` 88.3%, `models` [no statements], `pkg/firestore` 85.0%). |
-| Build / CI | `go build ./...`, `go vet ./...` y contenedor Docker multi-stage (`golang:1.26-alpine` → `gcr.io/distroless/static-debian12:nonroot`, ~22 MB) verificados. Workflow CI `.github/workflows/ci.yml` en `actions/checkout@v7` + `actions/setup-go@v7` (Node.js 24) con `go test -race -cover -count=1 ./...` en verde (run `45597881616` sin avisos Node 20). |
+| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `BODY_LIMIT`, `CORS_ALLOWED_ORIGINS`, `RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`, `strictJSONSerializer`, `RequestID`/`Logger`/`Recover`/`CORS`/`RateLimiter`/`BodyLimit`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`, `PatchPaciente` con validación estricta de tipos) y controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/ultimo`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen` con `?desde=&hasta=`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
+| Tests | `go test -cover -count=1 ./...` verde (126 tests top-level: `nutricontrol` 67.3%, `handlers` 88.3%, `models` [no statements], `pkg/firestore` 85.0%). |
+| Build / CI | `go build ./...`, `go vet ./...` y contenedor Docker multi-stage (`golang:1.26-alpine` → `gcr.io/distroless/static-debian12:nonroot`, ~22 MB) verificados. Workflow CI `.github/workflows/ci.yml` en `actions/checkout@v7` + `actions/setup-go@v7` (Node.js 24) con `go test -race -cover -count=1 ./...` en verde (runs `45597881616` y `45799288074` en `39s` sin avisos Node 20). |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente. `feature-c4-search.md` y `feature-b-paginacion-firestore.md` archivados en `odd/tasks/archive/`. |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
@@ -416,7 +419,17 @@ go vet ./...                     # Verificación estándar
   - Validados suite Go (`124` tests top-level: `nutricontrol` `59.1%`, `handlers` `88.3%`, `models` `[no statements]`, `pkg/firestore` `85.0%`), build/smoke test Docker real (`22.049.372 bytes`, `/health`, `/`, `POST /pacientes` y cierre por `SIGTERM`) y auditoría independiente read-only `PASS`.
   - Commit: `714f97a build: agregar Dockerfile multi-stage y .dockerignore`.
 
-### 6.24 Dificultades acumuladas y decisiones de diseño
+### 6.24 Feature: Rate limiting opcional por IP en `main.go` y `plan.md` (v1.0.22)
+
+- **Rate limiting opcional por IP (`main.go`, `main_test.go`, `go.mod`)**:
+  - `resolveRateLimit` valida `RATE_LIMIT_RPS` y `RATE_LIMIT_BURST` sin `panic` (desactivado por defecto si falta, es `<= 0`, texto inválido o `NaN`/`Inf`).
+  - `newEchoWithConfig` registra `middleware.RateLimiterWithConfig` + `middleware.NewRateLimiterMemoryStoreWithConfig` (`defaultRateLimitTTL = 3m`, `golang.org/x/time/rate`) entre `CORSWithConfig` y `BodyLimit`, eximiendo `OPTIONS` y `GET /health` (`c.Path() == "/health"`) y devolviendo `429 Too Many Requests` JSON (`{"error": ...}`) mediante `echo.NewHTTPError`.
+  - `go.mod`: `golang.org/x/time v0.16.0` promovido a `require` directo vía `go mod tidy`.
+  - Tests: `TestLoadServerConfig`, `TestResolveRateLimit` (12 subcasos) y `TestNewEchoRateLimit` (`126` tests top-level en verde: `nutricontrol` `67.3%`, `handlers` `88.3%`, `models` `[no statements]`, `pkg/firestore` `85.0%`; auditoría read-only `PASS`; CI `v1.0.21` run `45799288074` PASS en `39s`).
+  - Commit: `76fdb3b feat: agregar rate limiting opcional por IP en main.go`.
+- **Hoja de ruta operativa (`plan.md`)**: creada en raíz con el plan técnico para autenticación HTTP (`API_KEY` vs `JWT`), paginación con cursores `StartAfter` en Firestore (`GetPage` + `fakeFirestoreServer.RunQuery`) y checklist ODD.
+
+### 6.25 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -457,6 +470,9 @@ go vet ./...                     # Verificación estándar
 37. **Reutilización directa de `obtenerControlesFiltrados` en `GetResumenControlesPaciente`**: elimina la duplicación de validaciones (`id`, `repo.GetByID`, `repo.GetControles`) unificando el soporte de `?desde=&hasta=`, la precedencia `404` antes que `400` y el ajuste inclusivo hasta fin de día UTC sin introducir paginación en el resumen.
 38. **Semántica `200 OK` con `total_controles: 0` ante rangos vacíos en `/controles/resumen`**: a diferencia de `/controles/ultimo` (recurso puntual que responde `404`), `/resumen` mantiene `200 OK` omitiendo `fecha_inicio`/`fecha_fin` (`omitempty`), coherente con el estado inicial de un paciente sin controles.
 39. **`gcr.io/distroless/static-debian12:nonroot`, `ENTRYPOINT` exec y `.dockerignore`**: frente a `scratch`, `distroless:nonroot` incluye los certificados CA requeridos por Cloud Firestore gRPC/TLS y ejecución sin privilegios `root` (~22 MB); el formato exec entrega `SIGTERM` directo a `signal.NotifyContext` en `main.go`, y `.dockerignore` evita enviar `.git/`, docs o binarios invalidando la caché de `go mod download`.
+40. **Orden `CORS` → `RateLimiter` → `BodyLimit` y `c.Path()` en `Skipper`**: registrar `CORSWithConfig` antes de `RateLimiterWithConfig` conserva `Access-Control-Allow-Origin` en respuestas `429`, poner `BodyLimit` detrás evita leer el body en peticiones rechazadas, y como `e.Use` corre tras `Router.Find`, `c.Path() == "/health"` exime el healthcheck sin abrir rutas inexistentes.
+41. **`echo.NewHTTPError(429, map[string]string{...})` frente a `c.JSON` directo en `DenyHandler`**: `RateLimiterWithConfig` invoca `c.Error(config.DenyHandler(...))`; retornar un `*echo.HTTPError` con mapa evita el envoltorio `{"message": ...}` de `DefaultHTTPErrorHandler`, mantiene el formato `{"error": ...}`, registra el error en `Logger` y emite `NoContent(429)` ante `HEAD`.
+42. **Supuestos operacionales de `RateLimiterMemoryStore` y `c.RealIP()`**: mantener `RATE_LIMIT_RPS` opt-in reutiliza `golang.org/x/time/rate` sin nuevas dependencias, aunque `c.RealIP()` asume proxy confiable para `X-Forwarded-For` si no se fija `e.IPExtractor`, las cuotas en memoria (`TTL 3m`) son por réplica, no se emite `Retry-After` y valores astronómicos (> `math.MaxInt`) desbordarían `int(math.Ceil(rps))`.
 
 ## 7. Convenciones de entrega
 

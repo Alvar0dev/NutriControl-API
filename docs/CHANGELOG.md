@@ -1,5 +1,28 @@
 # CHANGELOG.md
 
+## Versión 1.0.22 - 2026-11-27
+
+### Rate limiting opcional por IP en `main.go` y hoja de ruta `plan.md`
+
+- **Rate limiting opcional por IP (`main.go`, `main_test.go`, `go.mod`)**:
+  - `resolveRateLimit(rpsEnv, burstEnv)`: lee `RATE_LIMIT_RPS` y `RATE_LIMIT_BURST` de forma segura; valores vacíos, `<= 0`, no numéricos o `NaN`/`Inf` dejan el limitador desactivado sin `panic`, mientras un burst ausente o `<= 0` usa `max(1, ceil(rps))`.
+  - `newEchoWithConfig`: registra `middleware.RateLimiterWithConfig` + `middleware.NewRateLimiterMemoryStoreWithConfig` (`defaultRateLimitTTL = 3m` sobre `golang.org/x/time/rate`) en la cadena `RequestID` → `Logger` → `Recover` → `CORSWithConfig` (opcional) → `RateLimiterWithConfig` (opcional) → `BodyLimit`.
+  - `Skipper` exime preflights `OPTIONS` y `GET /health` (`c.Path() == "/health"`); `DenyHandler` responde `echo.NewHTTPError(http.StatusTooManyRequests, map[string]string{"error": "Demasiadas peticiones, intente nuevamente más tarde"})` conservando cabeceras CORS en `429` y emitiendo `NoContent` en `HEAD`.
+  - `go.mod`: `golang.org/x/time v0.16.0` promovido a `require` directo vía `go mod tidy` sin nuevas dependencias externas.
+  - Tests en `main_test.go`: actualizado `TestLoadServerConfig` y añadidos `TestResolveRateLimit` (12 subcasos) y `TestNewEchoRateLimit` (`126` tests top-level en verde: `nutricontrol` `67.3%`, `handlers` `88.3%`, `models` `[no statements]`, `pkg/firestore` `85.0%`; `go vet ./...` y `go build ./...` OK; auditoría independiente read-only de seguridad `PASS`).
+- **Hoja de ruta y verificación previa (`plan.md`, CI `v1.0.21`)**:
+  - Creado `plan.md` en la raíz con el plan técnico para las próximas sesiones (Receta A autenticación HTTP `API_KEY`/`JWT`, Receta B paginación `StartAfter` en Firestore + `fakeFirestoreServer.RunQuery`, concurrencia opcional en mock y checklist ODD).
+  - Confirmada vía `gh run list` / `gh run view 45799288074` la corrida en verde de CI `v1.0.21` (`564c1c3`, `39s` en `ubuntu-latest` con Go `1.26.1` y `-race`).
+- Commit: `76fdb3b` (`feat: agregar rate limiting opcional por IP en main.go`).
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Orden `CORS` → `RateLimit` → `BodyLimit` y uso de `c.Path() == "/health"` en `Skipper`.** Al colocar `CORSWithConfig` antes de `RateLimiterWithConfig`, Echo escribe `Access-Control-Allow-Origin` antes de evaluar la cuota por IP, evitando que clientes web confundan un `429` con un bloqueo CORS; ubicar `BodyLimit` detrás evita leer el cuerpo en peticiones ya rechazadas. Además, como `e.Use(...)` se ejecuta tras `Router.Find`, `c.Path()` ya viene resuelto y permite eximir `/health` y `OPTIONS` sin abrir rutas inexistentes (`c.Path() == ""`).
+2. **`echo.NewHTTPError(429, map[string]string{...})` frente a `c.JSON` directo en `DenyHandler`.** `RateLimiterWithConfig` delega el rechazo llamando a `c.Error(config.DenyHandler(...))`. Devolver `*echo.HTTPError` con un mapa evita que `DefaultHTTPErrorHandler` envuelva la respuesta en `{"message": ...}`, mantiene uniforme `{"error": ...}`, registra el error en `Logger` y delega a Echo enviar `NoContent(429)` ante `HEAD`.
+3. **Configuración opt-in sin dependencias nuevas ni ruptura de tests.** Mantener el limitador apagado por defecto cuando falta `RATE_LIMIT_RPS` (igual que `CORS_ALLOWED_ORIGINS`) evita romper entornos locales o suites existentes, y promueve a directa la librería `golang.org/x/time/rate` que Echo ya incluía de forma transitiva.
+4. **Supuestos operacionales detectados en la auditoría de seguridad (`c.RealIP()` y memoria por instancia).** Sin `e.IPExtractor` explícito, `c.RealIP()` confía en `X-Forwarded-For`/`X-Real-IP` (adecuado tras el balanceador de Cloud Run, pero susceptible a spoofing si la API se expusiera directamente sin proxy confiable), y `RateLimiterMemoryStore` mantiene cuotas por réplica con TTL de `3m` sin cabecera `Retry-After` (un `RATE_LIMIT_RPS` astronómico > `math.MaxInt` también desbordaría `int(math.Ceil(rps))`). Estas limitaciones quedan documentadas en `docs/arquitectura-y-defensa.md`.
+
+---
 ## Versión 1.0.21 - 2026-11-26
 
 ### Filtrado temporal en resumen de controles (`?desde=&hasta=`), verificación CI v7 y `Dockerfile` multi-stage

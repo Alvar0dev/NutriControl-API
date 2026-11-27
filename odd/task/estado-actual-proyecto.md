@@ -59,6 +59,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T38 | S1 | inline | done | `docs/arquitectura-y-defensa.md`: guía técnica de arquitectura y defensa Q&A |
 | T39 | S1 | inline | done | `92f26e3` feat: soportar filtro temporal desde/hasta en resumen de controles |
 | T40 | S1 | inline | done | `714f97a` build: agregar Dockerfile multi-stage y .dockerignore |
+| T41 | S1 | inline | done | `76fdb3b` feat: agregar rate limiting opcional por IP en main.go |
 
 ## Log
 
@@ -248,6 +249,17 @@ L39: [asistente] Planificadas las 3 opciones y ejecutadas test-first las Opcione
 L40: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
 L40: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.21 (reutilización de `obtenerControlesFiltrados`, semántica `200 OK` en rango vacío para `/resumen`, `distroless:nonroot` por certificados CA de Cloud Firestore TLS/gRPC y `ENTRYPOINT` exec para `SIGTERM`, exclusión de contexto `.dockerignore` y separación del commit `build:`) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (2, 3.2, 5.2, 6, 6.23 y 6.24), `AGENTS.md`, `docs/arquitectura-y-defensa.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: rate limiting opcional por IP en `main.go` configurable por env var; Opción 2: paginación nativa con cursores `StartAfter` en `PacienteFirestoreRepo`; Opción 3: autenticación HTTP mediante middleware JWT/API key configurable).
+
+L41: [usuario] "Planifica bien como hacer los todo y como reflejarlos en la documentacion" → "haz el todo 1 y guarda en plan.md para los proximos dias como continuar   para no tener que volver a procesar el plan"
+L41: [asistente] Verificada corrida CI v7 `45799288074` (`v1.0.21`) en verde (`39s`) y ejecutado test-first el TODO 1 (`v1.0.22`, commit `76fdb3b`, `Risk: item 2 y item 5`):
+- `main.go`: agregado `resolveRateLimit` (`RATE_LIMIT_RPS`, `RATE_LIMIT_BURST`) y registrado `middleware.RateLimiterWithConfig` + `middleware.NewRateLimiterMemoryStoreWithConfig` (`defaultRateLimitTTL = 3m`, `golang.org/x/time/rate`) entre `CORSWithConfig` y `BodyLimit`, con `Skipper` para `OPTIONS` y `/health` (`c.Path() == "/health"`) y `DenyHandler` devolviendo `echo.NewHTTPError(429, map[string]string{"error": ...})`.
+- `go.mod`: `golang.org/x/time v0.16.0` promovido a `require` directo vía `go mod tidy` sin nuevas dependencias.
+- `main_test.go`: actualizado `TestLoadServerConfig` y agregados `TestResolveRateLimit` (12 subcasos) y `TestNewEchoRateLimit` (`126` tests top-level en verde: `nutricontrol` `67.3%`, `handlers` `88.3%`, `models` `[no statements]`, `pkg/firestore` `85.0%`; auditoría independiente read-only `PASS`).
+- `plan.md`: guardada hoja de ruta técnica para próximos días (Receta A autenticación HTTP `API_KEY` vs `JWT`, Receta B cursores `StartAfter` en Firestore + `fakeFirestoreServer.RunQuery`, concurrencia opcional en mock y checklist ODD).
+
+L42: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L42: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.22 (orden `CORS`→`RateLimit`→`BodyLimit`, resolución temprana de `c.Path()` en `Router.Find` para `Skipper`, `echo.NewHTTPError` vs `c.JSON` en `DenyHandler` para preservar formato `{"error":...}` y soporte `HEAD`, configuración opt-in y supuestos operacionales de `c.RealIP()` / cuota en memoria por instancia) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (2, 3.1, 5.4, 6, 6.24 y 6.25), `AGENTS.md`, `docs/organizacion-documentacion.md`, `docs/arquitectura-y-defensa.md`, `plan.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: autenticación HTTP opcional en `main.go` según `plan.md` Receta A; Opción 2: paginación nativa con cursores `StartAfter` en Firestore según `plan.md` Receta B; Opción 3: `sync.RWMutex` en `MockPacienteRepository` y/o `IPExtractor` + tope entero en rate limiting).
 
 
 
