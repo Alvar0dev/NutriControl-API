@@ -169,11 +169,46 @@ func TestLoadServerConfig(t *testing.T) {
 	t.Setenv("PORT", "9091")
 	t.Setenv("BODY_LIMIT", "2M")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173, https://admin.example.com")
+	t.Setenv("RATE_LIMIT_RPS", "15")
+	t.Setenv("RATE_LIMIT_BURST", "30")
 
 	cfg := loadServerConfig()
 	assert.Equal(t, ":9091", cfg.Addr)
 	assert.Equal(t, "2M", cfg.BodyLimit)
 	assert.Equal(t, []string{"http://localhost:5173", "https://admin.example.com"}, cfg.CORSAllowedOrigins)
+	assert.Equal(t, 15.0, cfg.RateLimitRPS)
+	assert.Equal(t, 30, cfg.RateLimitBurst)
+}
+
+func TestResolveRateLimit(t *testing.T) {
+	casos := []struct {
+		name          string
+		rpsEnv        string
+		burstEnv      string
+		expectedRPS   float64
+		expectedBurst int
+	}{
+		{name: "vacio desactiva rate limiting", rpsEnv: "", burstEnv: "", expectedRPS: 0, expectedBurst: 0},
+		{name: "solo espacios desactiva rate limiting", rpsEnv: "   ", burstEnv: "10", expectedRPS: 0, expectedBurst: 0},
+		{name: "cero desactiva rate limiting", rpsEnv: "0", burstEnv: "10", expectedRPS: 0, expectedBurst: 0},
+		{name: "negativo desactiva rate limiting", rpsEnv: "-5", burstEnv: "10", expectedRPS: 0, expectedBurst: 0},
+		{name: "texto invalido desactiva rate limiting", rpsEnv: "abc", burstEnv: "10", expectedRPS: 0, expectedBurst: 0},
+		{name: "NaN e Inf desactivan rate limiting", rpsEnv: "NaN", burstEnv: "10", expectedRPS: 0, expectedBurst: 0},
+		{name: "RPS entero sin burst usa ceil(RPS)", rpsEnv: "10", burstEnv: "", expectedRPS: 10.0, expectedBurst: 10},
+		{name: "RPS decimal sin burst redondea hacia arriba", rpsEnv: "1.5", burstEnv: "", expectedRPS: 1.5, expectedBurst: 2},
+		{name: "RPS menor a 1 sin burst fija burst minimo 1", rpsEnv: "0.5", burstEnv: "", expectedRPS: 0.5, expectedBurst: 1},
+		{name: "RPS y burst explicitos con espacios", rpsEnv: " 20 ", burstEnv: " 50 ", expectedRPS: 20.0, expectedBurst: 50},
+		{name: "burst invalido o <= 0 recurre al burst por defecto", rpsEnv: "10", burstEnv: "no-int", expectedRPS: 10.0, expectedBurst: 10},
+		{name: "burst cero recurre al burst por defecto", rpsEnv: "10", burstEnv: "0", expectedRPS: 10.0, expectedBurst: 10},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			rps, burst := resolveRateLimit(tc.rpsEnv, tc.burstEnv)
+			assert.Equal(t, tc.expectedRPS, rps)
+			assert.Equal(t, tc.expectedBurst, burst)
+		})
+	}
 }
 
 func TestNewEchoBodyLimit(t *testing.T) {
@@ -348,6 +383,79 @@ func TestStrictJSONSerializerDeserializePropaga413(t *testing.T) {
 	err := (strictJSONSerializer{}).Deserialize(c, &p)
 	assert.True(t, errors.Is(err, echo.ErrStatusRequestEntityTooLarge))
 	assert.Empty(t, p.Nombre)
+}
+
+func TestNewEchoRateLimit(t *testing.T) {
+	t.Run("sin RATE_LIMIT_RPS no limita peticiones", func(t *testing.T) {
+		repo := firestore.NewMockPacienteRepository()
+		e := newEcho(repo)
+
+		for i := 0; i < 10; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+			req.RemoteAddr = "203.0.113.10:1234"
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusOK, rec.Code)
+		}
+	})
+
+	t.Run("con limite activo permite rafaga, devuelve 429 JSON, aisla por IP, omite health/OPTIONS y conserva CORS", func(t *testing.T) {
+		repo := firestore.NewMockPacienteRepository()
+		e := newEchoWithConfig(repo, serverConfig{
+			Addr:               ":8080",
+			BodyLimit:          defaultBodyLimit,
+			CORSAllowedOrigins: []string{"http://localhost:3000"},
+			RateLimitRPS:       0.001,
+			RateLimitBurst:     2,
+		})
+
+		ip1 := "203.0.113.10:1234"
+		ip2 := "203.0.113.20:5678"
+
+		// Ráfaga inicial de 2 peticiones permitida para ip1
+		for i := 0; i < 2; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+			req.RemoteAddr = ip1
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusOK, rec.Code)
+		}
+
+		// La tercera petición de ip1 excede la cuota → 429 JSON manteniendo cabecera CORS
+		reqLimited := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+		reqLimited.RemoteAddr = ip1
+		reqLimited.Header.Set(echo.HeaderOrigin, "http://localhost:3000")
+		recLimited := httptest.NewRecorder()
+		e.ServeHTTP(recLimited, reqLimited)
+		assert.Equal(t, http.StatusTooManyRequests, recLimited.Code)
+		assert.Contains(t, recLimited.Body.String(), `"error"`)
+		assert.Contains(t, recLimited.Body.String(), "Demasiadas peticiones")
+		assert.Equal(t, "http://localhost:3000", recLimited.Header().Get(echo.HeaderAccessControlAllowOrigin))
+
+		// Otra IP mantiene su propia cuota intacta
+		reqIP2 := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+		reqIP2.RemoteAddr = ip2
+		recIP2 := httptest.NewRecorder()
+		e.ServeHTTP(recIP2, reqIP2)
+		assert.Equal(t, http.StatusOK, recIP2.Code)
+
+		// /health y preflight OPTIONS siguen permitidos incluso para ip1 bloqueada
+		for i := 0; i < 3; i++ {
+			reqHealth := httptest.NewRequest(http.MethodGet, "/health", nil)
+			reqHealth.RemoteAddr = ip1
+			recHealth := httptest.NewRecorder()
+			e.ServeHTTP(recHealth, reqHealth)
+			assert.Equal(t, http.StatusOK, recHealth.Code)
+
+			reqOpt := httptest.NewRequest(http.MethodOptions, "/pacientes", nil)
+			reqOpt.RemoteAddr = ip1
+			reqOpt.Header.Set(echo.HeaderOrigin, "http://localhost:3000")
+			reqOpt.Header.Set(echo.HeaderAccessControlRequestMethod, http.MethodPost)
+			recOpt := httptest.NewRecorder()
+			e.ServeHTTP(recOpt, reqOpt)
+			assert.Equal(t, http.StatusNoContent, recOpt.Code)
+		}
+	})
 }
 
 var _ io.ReadCloser = (*partialLimitReader)(nil)

@@ -7,10 +7,12 @@ import (
 	"errors"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -18,25 +20,29 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/bytes"
+	"golang.org/x/time/rate"
 
 	"nutricontrol/handlers"
 	"nutricontrol/pkg/firestore"
 )
 
 const (
-	defaultAddr       = ":8080"
-	defaultBodyLimit  = "1M"
-	readHeaderTimeout = 5 * time.Second
-	readTimeout       = 15 * time.Second
-	writeTimeout      = 15 * time.Second
-	idleTimeout       = 60 * time.Second
-	shutdownTimeout   = 10 * time.Second
+	defaultAddr         = ":8080"
+	defaultBodyLimit    = "1M"
+	defaultRateLimitTTL = 3 * time.Minute
+	readHeaderTimeout   = 5 * time.Second
+	readTimeout         = 15 * time.Second
+	writeTimeout        = 15 * time.Second
+	idleTimeout         = 60 * time.Second
+	shutdownTimeout     = 10 * time.Second
 )
 
 type serverConfig struct {
 	Addr               string
 	BodyLimit          string
 	CORSAllowedOrigins []string
+	RateLimitRPS       float64
+	RateLimitBurst     int
 }
 
 // resolveAddr normaliza el valor de la variable de entorno PORT al formato ":<puerto>".
@@ -78,6 +84,32 @@ func parseCORSOrigins(originsEnv string) []string {
 	return origins
 }
 
+// resolveRateLimit valida RATE_LIMIT_RPS y RATE_LIMIT_BURST de forma segura sin provocar panics;
+// si RATE_LIMIT_RPS falta o es <= 0/inválido devuelve (0, 0) dejando el rate limiting desactivado.
+func resolveRateLimit(rpsEnv, burstEnv string) (float64, int) {
+	rawRPS := strings.TrimSpace(rpsEnv)
+	if rawRPS == "" {
+		return 0, 0
+	}
+	rps, err := strconv.ParseFloat(rawRPS, 64)
+	if err != nil || math.IsNaN(rps) || math.IsInf(rps, 0) || rps <= 0 {
+		log.Printf("RATE_LIMIT_RPS inválido (%q), rate limiting desactivado", rpsEnv)
+		return 0, 0
+	}
+
+	defaultBurst := int(math.Max(1, math.Ceil(rps)))
+	rawBurst := strings.TrimSpace(burstEnv)
+	if rawBurst == "" {
+		return rps, defaultBurst
+	}
+	parsedBurst, err := strconv.Atoi(rawBurst)
+	if err != nil || parsedBurst <= 0 {
+		log.Printf("RATE_LIMIT_BURST inválido (%q), usando ráfaga por defecto %d", burstEnv, defaultBurst)
+		return rps, defaultBurst
+	}
+	return rps, parsedBurst
+}
+
 func defaultServerConfig(addr string) serverConfig {
 	return serverConfig{
 		Addr:      resolveAddr(addr),
@@ -86,10 +118,13 @@ func defaultServerConfig(addr string) serverConfig {
 }
 
 func loadServerConfig() serverConfig {
+	rps, burst := resolveRateLimit(os.Getenv("RATE_LIMIT_RPS"), os.Getenv("RATE_LIMIT_BURST"))
 	return serverConfig{
 		Addr:               resolveAddr(os.Getenv("PORT")),
 		BodyLimit:          resolveBodyLimit(os.Getenv("BODY_LIMIT")),
 		CORSAllowedOrigins: parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")),
+		RateLimitRPS:       rps,
+		RateLimitBurst:     burst,
 	}
 }
 
@@ -110,7 +145,7 @@ func (strictJSONSerializer) Deserialize(c echo.Context, i any) error {
 	return json.Unmarshal(body, i)
 }
 
-// newEchoWithConfig construye Echo con middlewares operativos, protección de entrada (CORS opcional, BodyLimit) y rutas.
+// newEchoWithConfig construye Echo con middlewares operativos, protección de entrada (CORS, RateLimit opcionales, BodyLimit) y rutas.
 func newEchoWithConfig(repo firestore.PacienteRepository, cfg serverConfig) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
@@ -125,6 +160,28 @@ func newEchoWithConfig(repo firestore.PacienteRepository, cfg serverConfig) *ech
 			AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
 			AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID},
 			AllowCredentials: false,
+		}))
+	}
+	if cfg.RateLimitRPS > 0 && !math.IsNaN(cfg.RateLimitRPS) && !math.IsInf(cfg.RateLimitRPS, 0) {
+		burst := cfg.RateLimitBurst
+		if burst <= 0 {
+			burst = int(math.Max(1, math.Ceil(cfg.RateLimitRPS)))
+		}
+		limiterStore := middleware.NewRateLimiterMemoryStoreWithConfig(middleware.RateLimiterMemoryStoreConfig{
+			Rate:      rate.Limit(cfg.RateLimitRPS),
+			Burst:     burst,
+			ExpiresIn: defaultRateLimitTTL,
+		})
+		e.Use(middleware.RateLimiterWithConfig(middleware.RateLimiterConfig{
+			Skipper: func(c echo.Context) bool {
+				return c.Request().Method == http.MethodOptions || c.Path() == "/health"
+			},
+			Store: limiterStore,
+			DenyHandler: func(c echo.Context, identifier string, err error) error {
+				return echo.NewHTTPError(http.StatusTooManyRequests, map[string]string{
+					"error": "Demasiadas peticiones, intente nuevamente más tarde",
+				})
+			},
 		}))
 	}
 	e.Use(middleware.BodyLimit(resolveBodyLimit(cfg.BodyLimit)))
@@ -238,7 +295,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("Iniciando servidor en %s (body_limit=%s, cors_origins=%d)", cfg.Addr, cfg.BodyLimit, len(cfg.CORSAllowedOrigins))
+	log.Printf("Iniciando servidor en %s (body_limit=%s, cors_origins=%d, rate_limit_rps=%g, rate_limit_burst=%d)", cfg.Addr, cfg.BodyLimit, len(cfg.CORSAllowedOrigins), cfg.RateLimitRPS, cfg.RateLimitBurst)
 	if err := runServer(ctx, srv, shutdownTimeout); err != nil {
 		log.Fatalf("Error en servidor HTTP: %v", err)
 	}
