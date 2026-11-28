@@ -171,6 +171,7 @@ func TestLoadServerConfig(t *testing.T) {
 	t.Setenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173, https://admin.example.com")
 	t.Setenv("RATE_LIMIT_RPS", "15")
 	t.Setenv("RATE_LIMIT_BURST", "30")
+	t.Setenv("API_KEY", "  secret-test-key  ")
 
 	cfg := loadServerConfig()
 	assert.Equal(t, ":9091", cfg.Addr)
@@ -178,6 +179,25 @@ func TestLoadServerConfig(t *testing.T) {
 	assert.Equal(t, []string{"http://localhost:5173", "https://admin.example.com"}, cfg.CORSAllowedOrigins)
 	assert.Equal(t, 15.0, cfg.RateLimitRPS)
 	assert.Equal(t, 30, cfg.RateLimitBurst)
+	assert.Equal(t, "secret-test-key", cfg.APIKey)
+}
+
+func TestResolveAPIKey(t *testing.T) {
+	casos := []struct {
+		name     string
+		envVal   string
+		expected string
+	}{
+		{name: "vacio desactiva autenticacion", envVal: "", expected: ""},
+		{name: "solo espacios desactiva autenticacion", envVal: "   \t ", expected: ""},
+		{name: "recorta espacios alrededor", envVal: " mi-clave-secreta ", expected: "mi-clave-secreta"},
+	}
+
+	for _, tc := range casos {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, resolveAPIKey(tc.envVal))
+		})
+	}
 }
 
 func TestResolveRateLimit(t *testing.T) {
@@ -455,6 +475,211 @@ func TestNewEchoRateLimit(t *testing.T) {
 			e.ServeHTTP(recOpt, reqOpt)
 			assert.Equal(t, http.StatusNoContent, recOpt.Code)
 		}
+	})
+}
+
+func TestNewEchoAPIKeyAuth(t *testing.T) {
+	const testAPIKey = "clave-clinica-super-secreta"
+
+	t.Run("sin API_KEY mantiene acceso abierto en lectura y escritura", func(t *testing.T) {
+		repo := firestore.NewMockPacienteRepository()
+		e := newEcho(repo)
+
+		reqGet := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+		recGet := httptest.NewRecorder()
+		e.ServeHTTP(recGet, reqGet)
+		assert.Equal(t, http.StatusOK, recGet.Code)
+
+		reqPost := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(`{"nombre":"Abierto","edad":30,"peso":70}`))
+		reqPost.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		recPost := httptest.NewRecorder()
+		e.ServeHTTP(recPost, reqPost)
+		assert.Equal(t, http.StatusCreated, recPost.Code)
+	})
+
+	t.Run("API_KEY con solo espacios no activa autenticacion", func(t *testing.T) {
+		repo := firestore.NewMockPacienteRepository()
+		e := newEchoWithConfig(repo, serverConfig{
+			Addr:      ":8080",
+			BodyLimit: defaultBodyLimit,
+			APIKey:    "   ",
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("con API_KEY exime GET /health, GET / y preflight OPTIONS incluyendo X-API-Key en CORS", func(t *testing.T) {
+		repo := firestore.NewMockPacienteRepository()
+		e := newEchoWithConfig(repo, serverConfig{
+			Addr:               ":8080",
+			BodyLimit:          defaultBodyLimit,
+			CORSAllowedOrigins: []string{"http://localhost:3000"},
+			APIKey:             testAPIKey,
+		})
+
+		for _, tc := range []struct {
+			path string
+			body string
+		}{
+			{path: "/health", body: `"status":"ok"`},
+			{path: "/", body: "API NutriControl Operativa"},
+		} {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Contains(t, rec.Body.String(), tc.body)
+		}
+
+		reqOpt := httptest.NewRequest(http.MethodOptions, "/pacientes", nil)
+		reqOpt.Header.Set(echo.HeaderOrigin, "http://localhost:3000")
+		reqOpt.Header.Set(echo.HeaderAccessControlRequestMethod, http.MethodPost)
+		reqOpt.Header.Set(echo.HeaderAccessControlRequestHeaders, "X-API-Key, Content-Type")
+		recOpt := httptest.NewRecorder()
+		e.ServeHTTP(recOpt, reqOpt)
+		assert.Equal(t, http.StatusNoContent, recOpt.Code)
+		assert.Equal(t, "http://localhost:3000", recOpt.Header().Get(echo.HeaderAccessControlAllowOrigin))
+		assert.Contains(t, recOpt.Header().Get(echo.HeaderAccessControlAllowHeaders), "X-API-Key")
+
+		// OPTIONS sin CORS activo tampoco devuelve 401
+		eSinCORS := newEchoWithConfig(repo, serverConfig{
+			Addr:      ":8080",
+			BodyLimit: defaultBodyLimit,
+			APIKey:    testAPIKey,
+		})
+		reqOptSinCORS := httptest.NewRequest(http.MethodOptions, "/pacientes", nil)
+		recOptSinCORS := httptest.NewRecorder()
+		eSinCORS.ServeHTTP(recOptSinCORS, reqOptSinCORS)
+		assert.NotEqual(t, http.StatusUnauthorized, recOptSinCORS.Code)
+	})
+
+	t.Run("con API_KEY rechaza lectura y escritura sin clave o con clave invalida con 401 JSON y conserva CORS", func(t *testing.T) {
+		repo := firestore.NewMockPacienteRepository()
+		e := newEchoWithConfig(repo, serverConfig{
+			Addr:               ":8080",
+			BodyLimit:          defaultBodyLimit,
+			CORSAllowedOrigins: []string{"http://localhost:3000"},
+			APIKey:             testAPIKey,
+		})
+
+		rutasProtegidas := []struct {
+			name   string
+			method string
+			target string
+			body   string
+		}{
+			{name: "GET pacientes", method: http.MethodGet, target: "/pacientes"},
+			{name: "GET export", method: http.MethodGet, target: "/pacientes/export"},
+			{name: "POST pacientes", method: http.MethodPost, target: "/pacientes", body: `{"nombre":"Test","edad":30,"peso":70}`},
+			{name: "PUT paciente", method: http.MethodPut, target: "/pacientes/paciente-1", body: `{"nombre":"Test","edad":30,"peso":70}`},
+			{name: "PATCH paciente", method: http.MethodPatch, target: "/pacientes/paciente-1", body: `{"peso":71}`},
+			{name: "DELETE paciente", method: http.MethodDelete, target: "/pacientes/paciente-1"},
+			{name: "POST control", method: http.MethodPost, target: "/pacientes/paciente-1/controles", body: `{"peso":70,"porcentaje_grasa":20}`},
+		}
+
+		for _, tc := range rutasProtegidas {
+			t.Run(tc.name+" sin credencial", func(t *testing.T) {
+				req := httptest.NewRequest(tc.method, tc.target, strings.NewReader(tc.body))
+				if tc.body != "" {
+					req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+				}
+				req.Header.Set(echo.HeaderOrigin, "http://localhost:3000")
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+
+				assert.Equal(t, http.StatusUnauthorized, rec.Code)
+				assert.Contains(t, rec.Body.String(), `"error"`)
+				assert.Contains(t, rec.Body.String(), "No autorizado")
+				assert.Equal(t, "http://localhost:3000", rec.Header().Get(echo.HeaderAccessControlAllowOrigin))
+			})
+		}
+
+		credencialesInvalidas := []struct {
+			name   string
+			header string
+			value  string
+		}{
+			{name: "Bearer incorrecto", header: echo.HeaderAuthorization, value: "Bearer incorrecta"},
+			{name: "Bearer vacio", header: echo.HeaderAuthorization, value: "Bearer "},
+			{name: "X-API-Key incorrecta", header: "X-API-Key", value: "incorrecta"},
+			{name: "Authorization sin prefijo Bearer", header: echo.HeaderAuthorization, value: testAPIKey},
+		}
+
+		for _, tc := range credencialesInvalidas {
+			t.Run(tc.name, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+				req.Header.Set(tc.header, tc.value)
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+
+				assert.Equal(t, http.StatusUnauthorized, rec.Code)
+				assert.Contains(t, rec.Body.String(), "No autorizado")
+			})
+		}
+
+		// HEAD no debe emitir cuerpo en 401
+		reqHead := httptest.NewRequest(http.MethodHead, "/pacientes", nil)
+		recHead := httptest.NewRecorder()
+		e.ServeHTTP(recHead, reqHead)
+		assert.Equal(t, http.StatusUnauthorized, recHead.Code)
+		assert.Empty(t, recHead.Body.String())
+	})
+
+	t.Run("con API_KEY permite acceso completo con Authorization Bearer o X-API-Key validos", func(t *testing.T) {
+		repo := firestore.NewMockPacienteRepository()
+		e := newEchoWithConfig(repo, serverConfig{
+			Addr:      ":8080",
+			BodyLimit: defaultBodyLimit,
+			APIKey:    testAPIKey,
+		})
+
+		// Authorization: Bearer
+		reqGetBearer := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+		reqGetBearer.Header.Set(echo.HeaderAuthorization, "Bearer "+testAPIKey)
+		recGetBearer := httptest.NewRecorder()
+		e.ServeHTTP(recGetBearer, reqGetBearer)
+		assert.Equal(t, http.StatusOK, recGetBearer.Code)
+
+		// POST con Bearer en minúscula ("bearer ") también aceptado por valuesFromHeader
+		reqPostBearer := httptest.NewRequest(http.MethodPost, "/pacientes", strings.NewReader(`{"nombre":"Auth OK","edad":29,"peso":68}`))
+		reqPostBearer.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		reqPostBearer.Header.Set(echo.HeaderAuthorization, "bearer "+testAPIKey)
+		recPostBearer := httptest.NewRecorder()
+		e.ServeHTTP(recPostBearer, reqPostBearer)
+		assert.Equal(t, http.StatusCreated, recPostBearer.Code)
+
+		// X-API-Key
+		reqGetKey := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+		reqGetKey.Header.Set("X-API-Key", testAPIKey)
+		recGetKey := httptest.NewRecorder()
+		e.ServeHTTP(recGetKey, reqGetKey)
+		assert.Equal(t, http.StatusOK, recGetKey.Code)
+	})
+
+	t.Run("rate limiter actua antes que KeyAuth frente a intentos sin credencial", func(t *testing.T) {
+		repo := firestore.NewMockPacienteRepository()
+		e := newEchoWithConfig(repo, serverConfig{
+			Addr:           ":8080",
+			BodyLimit:      defaultBodyLimit,
+			RateLimitRPS:   0.001,
+			RateLimitBurst: 1,
+			APIKey:         testAPIKey,
+		})
+
+		req1 := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+		req1.RemoteAddr = "198.51.100.44:1234"
+		rec1 := httptest.NewRecorder()
+		e.ServeHTTP(rec1, req1)
+		assert.Equal(t, http.StatusUnauthorized, rec1.Code)
+
+		req2 := httptest.NewRequest(http.MethodGet, "/pacientes", nil)
+		req2.RemoteAddr = "198.51.100.44:1234"
+		rec2 := httptest.NewRecorder()
+		e.ServeHTTP(rec2, req2)
+		assert.Equal(t, http.StatusTooManyRequests, rec2.Code)
 	})
 }
 

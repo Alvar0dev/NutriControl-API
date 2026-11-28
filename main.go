@@ -3,6 +3,7 @@ package main
 import (
 	stdbytes "bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -43,6 +44,7 @@ type serverConfig struct {
 	CORSAllowedOrigins []string
 	RateLimitRPS       float64
 	RateLimitBurst     int
+	APIKey             string
 }
 
 // resolveAddr normaliza el valor de la variable de entorno PORT al formato ":<puerto>".
@@ -110,6 +112,16 @@ func resolveRateLimit(rpsEnv, burstEnv string) (float64, int) {
 	return rps, parsedBurst
 }
 
+// resolveAPIKey normaliza API_KEY recortando espacios y advierte si solo contiene espacios,
+// dejando la autenticación desactivada cuando queda vacía.
+func resolveAPIKey(apiKeyEnv string) string {
+	key := strings.TrimSpace(apiKeyEnv)
+	if key == "" && apiKeyEnv != "" {
+		log.Printf("API_KEY solo contiene espacios, autenticación desactivada")
+	}
+	return key
+}
+
 func defaultServerConfig(addr string) serverConfig {
 	return serverConfig{
 		Addr:      resolveAddr(addr),
@@ -125,6 +137,7 @@ func loadServerConfig() serverConfig {
 		CORSAllowedOrigins: parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")),
 		RateLimitRPS:       rps,
 		RateLimitBurst:     burst,
+		APIKey:             resolveAPIKey(os.Getenv("API_KEY")),
 	}
 }
 
@@ -145,7 +158,7 @@ func (strictJSONSerializer) Deserialize(c echo.Context, i any) error {
 	return json.Unmarshal(body, i)
 }
 
-// newEchoWithConfig construye Echo con middlewares operativos, protección de entrada (CORS, RateLimit opcionales, BodyLimit) y rutas.
+// newEchoWithConfig construye Echo con middlewares operativos, protección de entrada (CORS, RateLimit, API Key opcionales, BodyLimit) y rutas.
 func newEchoWithConfig(repo firestore.PacienteRepository, cfg serverConfig) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
@@ -158,7 +171,7 @@ func newEchoWithConfig(repo firestore.PacienteRepository, cfg serverConfig) *ech
 		e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 			AllowOrigins:     cfg.CORSAllowedOrigins,
 			AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
-			AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID},
+			AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, "X-API-Key", echo.HeaderXRequestID},
 			AllowCredentials: false,
 		}))
 	}
@@ -180,6 +193,26 @@ func newEchoWithConfig(repo firestore.PacienteRepository, cfg serverConfig) *ech
 			DenyHandler: func(c echo.Context, identifier string, err error) error {
 				return echo.NewHTTPError(http.StatusTooManyRequests, map[string]string{
 					"error": "Demasiadas peticiones, intente nuevamente más tarde",
+				})
+			},
+		}))
+	}
+	if apiKey := strings.TrimSpace(cfg.APIKey); apiKey != "" {
+		e.Use(middleware.KeyAuthWithConfig(middleware.KeyAuthConfig{
+			Skipper: func(c echo.Context) bool {
+				if c.Request().Method == http.MethodOptions {
+					return true
+				}
+				return c.Request().Method == http.MethodGet && (c.Path() == "/health" || c.Path() == "/")
+			},
+			KeyLookup:  "header:" + echo.HeaderAuthorization + ",header:X-API-Key",
+			AuthScheme: "Bearer",
+			Validator: func(key string, c echo.Context) (bool, error) {
+				return subtle.ConstantTimeCompare([]byte(key), []byte(apiKey)) == 1, nil
+			},
+			ErrorHandler: func(err error, c echo.Context) error {
+				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{
+					"error": "No autorizado",
 				})
 			},
 		}))
@@ -295,7 +328,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("Iniciando servidor en %s (body_limit=%s, cors_origins=%d, rate_limit_rps=%g, rate_limit_burst=%d)", cfg.Addr, cfg.BodyLimit, len(cfg.CORSAllowedOrigins), cfg.RateLimitRPS, cfg.RateLimitBurst)
+	log.Printf("Iniciando servidor en %s (body_limit=%s, cors_origins=%d, rate_limit_rps=%g, rate_limit_burst=%d, auth_enabled=%t)", cfg.Addr, cfg.BodyLimit, len(cfg.CORSAllowedOrigins), cfg.RateLimitRPS, cfg.RateLimitBurst, cfg.APIKey != "")
 	if err := runServer(ctx, srv, shutdownTimeout); err != nil {
 		log.Fatalf("Error en servidor HTTP: %v", err)
 	}
