@@ -1,5 +1,25 @@
 # CHANGELOG.md
 
+## Versión 1.0.23 - 2026-11-28
+
+### Autenticación HTTP opcional por `API_KEY` (`KeyAuthWithConfig`) y verificación CI `v1.0.22`
+
+- **Autenticación opcional por `API_KEY` (`main.go`, `main_test.go`)**:
+  - `resolveAPIKey`: normaliza `API_KEY` con `strings.TrimSpace` y desactiva autenticación sin `panic` si falta o solo contiene espacios (emitiendo aviso sin imprimir el valor recibido). En arranque solo se registra `auth_enabled=%t`.
+  - `newEchoWithConfig`: cuando `APIKey != ""` registra `middleware.KeyAuthWithConfig` en la cadena `RequestID` → `Logger` → `Recover` → `CORSWithConfig` (opcional, añadiendo `"X-API-Key"` a `AllowHeaders`) → `RateLimiterWithConfig` (opcional) → `KeyAuthWithConfig` (opcional) → `BodyLimit`.
+  - `KeyLookup: "header:Authorization,header:X-API-Key"` con `AuthScheme: "Bearer"`, validación mediante `crypto/subtle.ConstantTimeCompare`, `Skipper` acotado exclusivamente a `OPTIONS`, `GET /health` y `GET /` (protegiendo todas las rutas clínicas `/pacientes*` tanto en lectura como en escritura), y `ErrorHandler` devolviendo `echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"error": "No autorizado"})`.
+  - Tests nuevos/ampliados en `main_test.go`: `TestLoadServerConfig`, `TestResolveAPIKey` y `TestNewEchoAPIKeyAuth` (`128` tests top-level en verde: `nutricontrol` `70.2%`, `handlers` `88.3%`, `models` `[no statements]`, `pkg/firestore` `85.0%`; `go vet ./...` y `go build ./...` OK; auditoría independiente read-only de seguridad `PASS`; cero dependencias añadidas en `go.mod`).
+- **Verificación de CI `v1.0.22`**: confirmada vía `gh run list` la corrida verde de `.github/workflows/ci.yml` sobre `22d8a7b` (run `45982386942`, `1m17s` en `ubuntu-latest` con Go `1.26.1` y `-race -cover`).
+- Commit: `de5c6e5` (`feat: agregar autenticación opcional por API key en main.go`).
+
+**Dificultades encontradas y por qué se construyó así:**
+
+1. **Unificación de respuesta `401` mediante `ErrorHandler` frente al `400 Bad Request` predeterminado de Echo.** Sin `ErrorHandler` personalizado, `middleware.KeyAuthWithConfig` responde `400` cuando falta la cabecera (`ErrKeyAuthMissing`) y `401` cuando la clave es inválida. Retornar `echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"error": "No autorizado"})` unifica ambos rechazos en `401` JSON consistente, conserva `Access-Control-Allow-Origin` y responde `NoContent(401)` en `HEAD`.
+2. **`KeyLookup` limpio con `AuthScheme: "Bearer"` y ampliación de `CORSConfig.AllowHeaders`.** Al revisar `createExtractors` en Echo `v4.16.0`, se comprobó que `"header:Authorization,header:X-API-Key"` con `AuthScheme: "Bearer"` recorta `"Bearer "` de forma case-insensitive únicamente sobre `Authorization` (rechazando `"Bearer "` vacío) y lee `X-API-Key` completo sin prefijo; además se incorporó `"X-API-Key"` en `CORSConfig.AllowHeaders` para que preflights `OPTIONS` en navegador no bloqueen clientes que usen esa cabecera.
+3. **Protección completa de rutas clínicas (`/pacientes*`) y precedencia `RateLimit` → `KeyAuth` → `BodyLimit`.** Debido a que `GET /pacientes*` y `/export` exponen información clínica sensible, `Skipper` exime únicamente `OPTIONS`, `GET /health` y `GET /` (protegiendo variantes como `/health/`, mayúsculas o `POST /health` gracias a `Router.Find` previo). Colocar `RateLimiter` delante frena fuerza bruta con `429` antes de validar claves, y colocar `KeyAuth` antes de `BodyLimit` evita consumir memoria leyendo cuerpos de peticiones no autenticadas.
+4. **Supuestos y tradeoffs operacionales de seguridad.** Se eligió `API_KEY` único frente a `JWT` para mantener cero dependencias externas mientras no haya multi-usuario/roles; `subtle.ConstantTimeCompare` compara en tiempo constante cuando coincide la longitud (un digest SHA-256 previo evitaría filtrar longitud si fuera requerido); en producción requiere terminación HTTPS/TLS externa (Cloud Run/proxy), clave de alta entropía (>= 32 bytes) y el supuesto de proxy confiable para `c.RealIP()` en el rate limiter.
+
+---
 ## Versión 1.0.22 - 2026-11-27
 
 ### Rate limiting opcional por IP en `main.go` y hoja de ruta `plan.md`

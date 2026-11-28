@@ -60,6 +60,7 @@ S3: "Crea el archivo `odd/task/<feature>.md` para documentar la funcionalidad o 
 | T39 | S1 | inline | done | `92f26e3` feat: soportar filtro temporal desde/hasta en resumen de controles |
 | T40 | S1 | inline | done | `714f97a` build: agregar Dockerfile multi-stage y .dockerignore |
 | T41 | S1 | inline | done | `76fdb3b` feat: agregar rate limiting opcional por IP en main.go |
+| T42 | S1 | inline | done | `de5c6e5` feat: agregar autenticación opcional por API key en main.go |
 
 ## Log
 
@@ -260,6 +261,15 @@ L41: [asistente] Verificada corrida CI v7 `45799288074` (`v1.0.21`) en verde (`3
 L42: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
 L42: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.22 (orden `CORS`→`RateLimit`→`BodyLimit`, resolución temprana de `c.Path()` en `Router.Find` para `Skipper`, `echo.NewHTTPError` vs `c.JSON` en `DenyHandler` para preservar formato `{"error":...}` y soporte `HEAD`, configuración opt-in y supuestos operacionales de `c.RealIP()` / cuota en memoria por instancia) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (2, 3.1, 5.4, 6, 6.24 y 6.25), `AGENTS.md`, `docs/organizacion-documentacion.md`, `docs/arquitectura-y-defensa.md`, `plan.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
 - Planteado el estado actual y los TODOs para mañana (Opción 1: autenticación HTTP opcional en `main.go` según `plan.md` Receta A; Opción 2: paginación nativa con cursores `StartAfter` en Firestore según `plan.md` Receta B; Opción 3: `sync.RWMutex` en `MockPacienteRepository` y/o `IPExtractor` + tope entero en rate limiting).
+
+L43: [usuario] "hacemos el todo 1" → respuestas `ask_question`: `API_KEY` (`KeyAuthWithConfig`, cero deps) protegiendo toda la API clínica (`/pacientes*`, lectura y escritura; públicos solo `OPTIONS`, `GET /health` y `GET /`).
+L43: [asistente] Verificada corrida CI `45982386942` (`v1.0.22`) en verde (`1m17s`) e implementado test-first el TODO 1 (`v1.0.23`, commit `de5c6e5`, `Risk: item 2`):
+- `main.go`: agregado `resolveAPIKey` (`API_KEY`), ampliado `CORSConfig.AllowHeaders` con `"X-API-Key"`, registrado `middleware.KeyAuthWithConfig` opt-in tras `RateLimiterWithConfig` y antes de `BodyLimit` (`KeyLookup: "header:Authorization,header:X-API-Key"`, `AuthScheme: "Bearer"`, validación `crypto/subtle.ConstantTimeCompare`, `Skipper` únicamente para `OPTIONS`, `GET /health` y `GET /`, `ErrorHandler` devolviendo `echo.NewHTTPError(401, {"error": "No autorizado"})`) y log seguro `auth_enabled=%t`.
+- `main_test.go`: ampliado `TestLoadServerConfig` y agregados `TestResolveAPIKey` y `TestNewEchoAPIKeyAuth` (`128` tests top-level en verde: `nutricontrol` `70.2%`, `handlers` `88.3%`, `models` `[no statements]`, `pkg/firestore` `85.0%`; auditoría independiente read-only `PASS`).
+
+L44: [usuario] "Guarda todo el proceso en la documentacion con todas las dificultades encontradas y el porque se ha construido asi, commitealo y pushealo. y plantea el estado y los todo para mañana continuar con el proyecto."
+L44: [asistente] Documentación consolidada con todas las dificultades y decisiones de diseño v1.0.23 (unificación `401` frente a `400` `ErrKeyAuthMissing`, `createExtractors` + `"X-API-Key"` en `CORSConfig.AllowHeaders`, protección integral de datos clínicos `/pacientes*` con precedencia `RateLimit`→`KeyAuth`→`BodyLimit`, y supuestos de longitud/TLS/entropía y `c.RealIP()`) en `docs/CHANGELOG.md`, `PROJECT_INDEX.md` (3.1, 5.4, 6, 6.25 y 6.26), `AGENTS.md`, `docs/arquitectura-y-defensa.md`, `plan.md`, `odd/task/estado-actual-proyecto.md` y `todo`.
+- Planteado el estado actual y los TODOs para mañana (Opción 1: cursores `StartAfter` en Firestore según `plan.md` Receta B; Opción 2: `sync.RWMutex` en `MockPacienteRepository` y/o `IPExtractor` + tope entero en rate limit; Opción 3: JWT o hash SHA-256 fijo si evolucionan roles/clientes).
 
 
 

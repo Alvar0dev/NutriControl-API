@@ -57,11 +57,13 @@
 - [done] Documentar dificultades y decisiones de diseño v1.0.21 en CHANGELOG, PROJECT_INDEX, AGENTS.md, arquitectura-y-defensa.md y estado ODD
 - [done] Opción 1: Rate limiting opcional por IP en main.go (RATE_LIMIT_RPS y RATE_LIMIT_BURST sobre golang.org/x/time/rate, v1.0.22) (commit 76fdb3b)
 - [done] Crear plan.md para próximos días y documentar dificultades y decisiones de diseño v1.0.22 en CHANGELOG, PROJECT_INDEX, AGENTS.md, organizacion-documentacion.md, arquitectura-y-defensa.md y estado ODD
-- [pending] Opción 1: Autenticación HTTP opcional en main.go (API_KEY vía middleware.KeyAuthWithConfig o JWT; ver plan.md Receta A)
-- [pending] Opción 2: Paginación nativa con cursores StartAfter en PacienteFirestoreRepo + fakeFirestoreServer (ver plan.md Receta B)
-- [pending] Opción 3: Proteger concurrencia en MockPacienteRepository (sync.RWMutex) y/o IPExtractor + tope entero en rate limiting
+- [done] Opción 1: Autenticación HTTP opcional por API_KEY en main.go (middleware.KeyAuthWithConfig, ConstantTimeCompare, CORS X-API-Key, Skipper público solo OPTIONS/GET /health y /, v1.0.23) (commit de5c6e5)
+- [done] Documentar dificultades y decisiones de diseño v1.0.23 en CHANGELOG, PROJECT_INDEX, AGENTS.md, arquitectura-y-defensa.md, plan.md y estado ODD
+- [pending] Opción 1: Paginación nativa con cursores StartAfter en PacienteFirestoreRepo + fakeFirestoreServer (ver plan.md Receta B)
+- [pending] Opción 2: Proteger concurrencia en MockPacienteRepository (sync.RWMutex) y/o IPExtractor + tope entero en rate limiting
+- [pending] Opción 3: Evolucionar Auth hacia JWT (golang-jwt/jwt/v5) o hash SHA-256 previo en API_KEY si se requieren roles o múltiples clientes
 
-=== Estado actual (2026-11-27) ===
+=== Estado actual (2026-11-28) ===
 
-Estado git: rama main actualizada (v1.0.22, 126 tests top-level en verde: nutricontrol 67.3%, handlers 88.3%, models y pkg/firestore 85.0%; go vet, go build y auditoría read-only PASS; CI v1.0.21 run 45799288074 PASS en 39s).
-Pendientes: ver plan.md (Opción 1: autenticación HTTP; Opción 2: cursores StartAfter en Firestore; Opción 3: sync.RWMutex en mock / hardening IPExtractor en rate limit).
+Estado git: rama main actualizada (v1.0.23, 128 tests top-level en verde: nutricontrol 70.2%, handlers 88.3%, models y pkg/firestore 85.0%; go vet, go build y auditoría read-only PASS; CI v1.0.22 run 45982386942 PASS en 1m17s).
+Pendientes: ver plan.md (Opción 1: cursores StartAfter en Firestore; Opción 2: sync.RWMutex en mock / hardening IPExtractor en rate limit; Opción 3: JWT/roles si evoluciona Auth).

@@ -62,11 +62,11 @@ nutricontrol/
 
 ### 3.1 Arranque — `main.go`
 
-Lee env vars: `PORT` (default `:8080`), `BODY_LIMIT` (default `"1M"`), `CORS_ALLOWED_ORIGINS` (opcional, separado por comas; desactivado por defecto), `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` (opcionales; desactivado por defecto si `RATE_LIMIT_RPS` falta o es `<= 0`), `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
+Lee env vars: `PORT` (default `:8080`), `BODY_LIMIT` (default `"1M"`), `CORS_ALLOWED_ORIGINS` (opcional, separado por comas; desactivado por defecto), `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` (opcionales; desactivado por defecto si `RATE_LIMIT_RPS` falta o es `<= 0`), `API_KEY` (opcional; protege todas las rutas clínicas salvo `OPTIONS`, `GET /health` y `GET /`), `NUTRICONTROL_USE_MOCK=true`, `GCP_PROJECT_ID=<id>`.
 
 - Si mock → `firestore.NewMockPacienteRepository()`.
 - Si real → `firestore.NewPacienteFirestoreRepo(ctx, projectID)` (falla abiertamente si no hay credenciales GCP).
-- Construye Echo vía `loadServerConfig()` + `newEchoWithConfig(repo, cfg)` (`strictJSONSerializer{}`, middlewares `RequestID` → `Logger` → `Recover` → `CORSWithConfig` opcional → `RateLimiterWithConfig` opcional → `BodyLimit`, `handlers.SetupRoutes(e, repo)` y `GET /`).
+- Construye Echo vía `loadServerConfig()` + `newEchoWithConfig(repo, cfg)` (`strictJSONSerializer{}`, middlewares `RequestID` → `Logger` → `Recover` → `CORSWithConfig` opcional → `RateLimiterWithConfig` opcional → `KeyAuthWithConfig` opcional → `BodyLimit`, `handlers.SetupRoutes(e, repo)` y `GET /`).
 - Arranca `*http.Server` (`newServerWithConfig`) con timeouts explícitos (`ReadHeaderTimeout: 5s`, `ReadTimeout: 15s`, `WriteTimeout: 15s`, `IdleTimeout: 60s`) y apagado ordenado (`runServer` / `serve`) ante `SIGINT`/`SIGTERM` con timeout de `10s`.
 
 ### 3.2 Rutas (contrato API)
@@ -195,6 +195,7 @@ go vet ./...                     # Verificación estándar
 | `CORS_ALLOWED_ORIGINS` | No | `http://localhost:3000,...` | Orígenes CORS permitidos separados por coma (desactivado si vacío). |
 | `RATE_LIMIT_RPS` | No | `15`, `2.5` | Peticiones/segundo por IP (`RateLimiterMemoryStore`, TTL `3m`; desactivado si falta o `<= 0`). |
 | `RATE_LIMIT_BURST` | No | `30` | Ráfaga máxima por IP cuando `RATE_LIMIT_RPS > 0` (default `max(1, ceil(RATE_LIMIT_RPS))`). |
+| `API_KEY` | No | `<secreto>` | Clave Bearer / `X-API-Key` que habilita autenticación HTTP en `/pacientes*` (desactivado si falta). |
 | `NUTRICONTROL_USE_MOCK` | No | `true` | Forzar mock en memoria. |
 | `GCP_PROJECT_ID` | No | `<id>` | ID proyecto GCP para Firestore real. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | `/path/cred.json` | Credenciales de servicio GCP. |
@@ -203,9 +204,9 @@ go vet ./...                     # Verificación estándar
 
 | Área | Estado |
 |------|--------|
-| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `BODY_LIMIT`, `CORS_ALLOWED_ORIGINS`, `RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`, `strictJSONSerializer`, `RequestID`/`Logger`/`Recover`/`CORS`/`RateLimiter`/`BodyLimit`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`, `PatchPaciente` con validación estricta de tipos) y controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/ultimo`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen` con `?desde=&hasta=`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
-| Tests | `go test -cover -count=1 ./...` verde (126 tests top-level: `nutricontrol` 67.3%, `handlers` 88.3%, `models` [no statements], `pkg/firestore` 85.0%). |
-| Build / CI | `go build ./...`, `go vet ./...` y contenedor Docker multi-stage (`golang:1.26-alpine` → `gcr.io/distroless/static-debian12:nonroot`, ~22 MB) verificados. Workflow CI `.github/workflows/ci.yml` en `actions/checkout@v7` + `actions/setup-go@v7` (Node.js 24) con `go test -race -cover -count=1 ./...` en verde (runs `45597881616` y `45799288074` en `39s` sin avisos Node 20). |
+| Código fuente | Servidor HTTP endurecido (`main.go`: `PORT`, `BODY_LIMIT`, `CORS_ALLOWED_ORIGINS`, `RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`, `API_KEY`, `strictJSONSerializer`, `RequestID`/`Logger`/`Recover`/`CORS`/`RateLimiter`/`KeyAuth`/`BodyLimit`, timeouts, `graceful shutdown`), CRUD completo de pacientes (`GET/POST/PUT/PATCH/DELETE` soft delete, `restore`, `inactivos`, `PatchPaciente` con validación estricta de tipos) y controles clínicos (`GET/POST /pacientes/:id/controles`, `GET /pacientes/:id/controles/ultimo`, `GET/PUT/PATCH/DELETE /pacientes/:id/controles/:controlId`, `resumen` con `?desde=&hasta=`, `export`), `GET /health`, IMC, reporte analítico, alta masiva, búsqueda con filtros/orden/paginación, `stats`, `count`, exportación CSV con `altura`, filtro por edad y validaciones clínicas. |
+| Tests | `go test -cover -count=1 ./...` verde (128 tests top-level: `nutricontrol` 70.2%, `handlers` 88.3%, `models` [no statements], `pkg/firestore` 85.0%). |
+| Build / CI | `go build ./...`, `go vet ./...` y contenedor Docker multi-stage (`golang:1.26-alpine` → `gcr.io/distroless/static-debian12:nonroot`, ~22 MB) verificados. Workflow CI `.github/workflows/ci.yml` en `actions/checkout@v7` + `actions/setup-go@v7` (Node.js 24) con `go test -race -cover -count=1 ./...` en verde (runs `45597881616`, `45799288074` y `45982386942` en `1m17s` sin avisos Node 20). |
 | Docs | `PROJECT_INDEX.md` consolidado. `odd/task/estado-actual-proyecto.md` vigente. |
 | Seguimiento ODD | `odd/task/estado-actual-proyecto.md` vigente. `feature-c4-search.md` y `feature-b-paginacion-firestore.md` archivados en `odd/tasks/archive/`. |
 | Ignorados | `*.exe`, `*.dll`, `.atl/` vía `.gitignore` (commit `3f78f12`). |
@@ -429,7 +430,15 @@ go vet ./...                     # Verificación estándar
   - Commit: `76fdb3b feat: agregar rate limiting opcional por IP en main.go`.
 - **Hoja de ruta operativa (`plan.md`)**: creada en raíz con el plan técnico para autenticación HTTP (`API_KEY` vs `JWT`), paginación con cursores `StartAfter` en Firestore (`GetPage` + `fakeFirestoreServer.RunQuery`) y checklist ODD.
 
-### 6.25 Dificultades acumuladas y decisiones de diseño
+### 6.25 Feature: Autenticación HTTP opcional por `API_KEY` (`KeyAuthWithConfig`) y verificación CI `v1.0.22` (v1.0.23)
+
+- **Autenticación opcional por `API_KEY` (`main.go`, `main_test.go`)**:
+  - `resolveAPIKey` normaliza `API_KEY` con `strings.TrimSpace` (si falta o solo contiene espacios desactiva auth sin `panic`, registrando únicamente `auth_enabled=%t` al iniciar).
+  - `newEchoWithConfig`: inserta `middleware.KeyAuthWithConfig` entre `RateLimiterWithConfig` y `BodyLimit`, amplía `CORSConfig.AllowHeaders` con `"X-API-Key"`, acepta `Authorization: Bearer <key>` y `X-API-Key: <key>` validados con `crypto/subtle.ConstantTimeCompare`, exime solo `OPTIONS`, `GET /health` y `GET /` (protegiendo lectura y escritura clínica `/pacientes*`) y responde `401` JSON uniforme (`{"error": "No autorizado"}`) vía `echo.NewHTTPError`.
+  - Tests: `TestLoadServerConfig`, `TestResolveAPIKey` y `TestNewEchoAPIKeyAuth` (`128` tests top-level en verde: `nutricontrol` `70.2%`, `handlers` `88.3%`, `models` `[no statements]`, `pkg/firestore` `85.0%`; auditoría read-only `PASS`; CI `v1.0.22` run `45982386942` PASS en `1m17s`).
+  - Commit: `de5c6e5 feat: agregar autenticación opcional por API key en main.go`.
+
+### 6.26 Dificultades acumuladas y decisiones de diseño
 
 1. **`c.Response().Body.Bytes()` no compila en Echo v4**: Echo v4 eliminó `.Body` de `*echo.Response`. En los tests se lee el cuerpo mediante `c.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes()` (commit `b3754f1`).
 2. **Parámetros de ruta (`c.Param`) vacíos al invocar handlers directo en tests**: Echo v4 guarda `pnames` y `pvalues` en campos no exportados del contexto. Se creó el helper `setParam(c, key, value)` con `reflect` + `unsafe.Pointer` para inyectar parámetros en tests unitarios sin pasar por el router.
@@ -473,6 +482,9 @@ go vet ./...                     # Verificación estándar
 40. **Orden `CORS` → `RateLimiter` → `BodyLimit` y `c.Path()` en `Skipper`**: registrar `CORSWithConfig` antes de `RateLimiterWithConfig` conserva `Access-Control-Allow-Origin` en respuestas `429`, poner `BodyLimit` detrás evita leer el body en peticiones rechazadas, y como `e.Use` corre tras `Router.Find`, `c.Path() == "/health"` exime el healthcheck sin abrir rutas inexistentes.
 41. **`echo.NewHTTPError(429, map[string]string{...})` frente a `c.JSON` directo en `DenyHandler`**: `RateLimiterWithConfig` invoca `c.Error(config.DenyHandler(...))`; retornar un `*echo.HTTPError` con mapa evita el envoltorio `{"message": ...}` de `DefaultHTTPErrorHandler`, mantiene el formato `{"error": ...}`, registra el error en `Logger` y emite `NoContent(429)` ante `HEAD`.
 42. **Supuestos operacionales de `RateLimiterMemoryStore` y `c.RealIP()`**: mantener `RATE_LIMIT_RPS` opt-in reutiliza `golang.org/x/time/rate` sin nuevas dependencias, aunque `c.RealIP()` asume proxy confiable para `X-Forwarded-For` si no se fija `e.IPExtractor`, las cuotas en memoria (`TTL 3m`) son por réplica, no se emite `Retry-After` y valores astronómicos (> `math.MaxInt`) desbordarían `int(math.Ceil(rps))`.
+43. **`ErrorHandler` `401` frente al `400 Bad Request` por defecto de Echo `KeyAuthWithConfig`**: sin `ErrorHandler`, la falta de cabecera (`ErrKeyAuthMissing`) devuelve `400` y una clave errónea `401`; retornar `echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"error": "No autorizado"})` unifica todo fallo en `401` JSON uniforme, conserva cabeceras CORS y responde `NoContent(401)` en `HEAD`.
+44. **`createExtractors` en `KeyLookup` y `"X-API-Key"` en `CORSConfig.AllowHeaders`**: `"header:Authorization,header:X-API-Key"` con `AuthScheme: "Bearer"` recorta `"Bearer "` de forma case-insensitive únicamente en `Authorization` (rechazando `"Bearer "` vacío) y preserva íntegro `X-API-Key`; incluir `"X-API-Key"` en `CORSConfig.AllowHeaders` evita bloqueos en preflight `OPTIONS`.
+45. **Protección total de `/pacientes*`, orden `RateLimit` → `KeyAuth` → `BodyLimit` y supuestos operacionales**: eximir en `Skipper` solo `OPTIONS`, `GET /health` y `GET /` resguarda datos clínicos sensibles (protegiendo también `/health/`, mayúsculas y `POST /health` tras `Router.Find`), frena fuerza bruta con `429` antes de validar claves y rechaza `401` antes de leer el cuerpo en `BodyLimit`; requiere TLS externo (Cloud Run), clave de alta entropía (>= 32 bytes) y tiene en cuenta que `ConstantTimeCompare` corta antes si difiere la longitud.
 
 ## 7. Convenciones de entrega
 
